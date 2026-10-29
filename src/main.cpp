@@ -189,7 +189,15 @@ void drawInfo(panel::Chrome &c) {
   panel::renderMessage(display::canvas(), s.name.c_str(), body.c_str(), net::ip().c_str(), c);
 }
 
+// What kind of screen is up ("setup", "info", "page:2", ...). Partial refreshes
+// leave a faint trace of what was there before, which shows when the whole
+// layout changes (seen on the first panel: old message text behind the
+// gauges). So a change of screen gets one full refresh; value updates on the
+// same screen stay partial.
+String lastScreen;
+
 void draw() {
+  String screen;
   panel::Chrome c;
   fillChrome(c);
   GFXcanvas1 &cv = display::canvas();
@@ -207,12 +215,15 @@ void draw() {
     c.footerAlert = false;
     snprintf(c.footerRight, sizeof c.footerRight, "build %d", (int)FW_BUILD);
     panel::renderSetup(cv, si, c);
+    screen = "setup";
   } else if (millis() < infoUntil) {
     drawInfo(c);
+    screen = "info";
   } else if (!net::online()) {
     panel::renderMessage(cv, "Joining Wi-Fi", ("Looking for " + (s.wifi.empty() ? String("a network") : s.wifi[0].ssid) +
                                                  " …\nHold the BOOT button 10 s to open the setup network.").c_str(),
                          "", c);
+    screen = "joining";
   } else {
     panel::Page p;
     if (!fetchPage(curPage, p)) {
@@ -227,8 +238,10 @@ void draw() {
         body = "Pick what to show at http://" + s.name + ".local\n(or http://" + net::ip() + ")";
       }
       panel::renderMessage(cv, title, body.c_str(), net::ip().c_str(), c);
+      screen = title;
     } else {
       panel::render(cv, p, c);
+      screen = "page:" + String(curPage) + ":" + String(p.n) + ":" + String(nPages);
     }
   }
   // A new build has proven itself once it is on Wi-Fi and drawing.
@@ -236,8 +249,9 @@ void draw() {
     ota_mark_healthy();
     healthy = true;
   }
-  bool full = fullAsked;
+  bool full = fullAsked || screen != lastScreen;
   fullAsked = false;
+  lastScreen = screen;
   display::show(full);
   if (identifyAsked) {
     identifyAsked = false;
