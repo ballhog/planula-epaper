@@ -35,6 +35,18 @@ volatile bool connected = false;
 volatile uint32_t lastMsg = 0;
 uint32_t sessionStart = 0, nextTry = 0, backoff = 15000;
 String state = "off", userId;
+String lastLogged;
+
+void setState(const String &st) {
+  state = st;
+  if (st != lastLogged && !st.startsWith("ok")) {
+    Serial.printf("[hydros] %s\n", st.c_str());
+    lastLogged = st;
+  } else if (st.startsWith("ok") && !lastLogged.startsWith("ok")) {
+    Serial.printf("[hydros] %s\n", st.c_str());
+    lastLogged = st;
+  }
+}
 std::vector<Thing> things;
 String wsHost, wsPath, clientIdStr;
 
@@ -266,7 +278,11 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     tinfl_status st = tinfl_decompress(d, p, &inLen, out, out, &outLen,
                                        TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
     free(d);
-    if (st != TINFL_STATUS_DONE) { free(out); return; }
+    if (st != TINFL_STATUS_DONE) {
+      Serial.printf("[hydros] %s: zlib failed (%d)\n", topic.c_str(), (int)st);
+      free(out);
+      return;
+    }
     json = out;
     jlen = outLen;
   }
@@ -277,8 +293,17 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, (const char *)json, jlen, DeserializationOption::Filter(filter));
   free(out);
-  if (err) return;
+  if (err) {
+    Serial.printf("[hydros] %s: %u bytes, JSON %s\n", topic.c_str(), (unsigned)len, err.c_str());
+    return;
+  }
   lastMsg = millis();
+  static uint32_t lastLog = 0;
+  if (!lastLog || millis() - lastLog > 300000UL) {
+    lastLog = millis();
+    Serial.printf("[hydros] data on %s: %u bytes, %u inputs\n", topic.c_str(), (unsigned)len,
+                  (unsigned)doc["Input"].as<JsonObjectConst>().size());
+  }
   for (JsonPairConst kv : doc["Input"].as<JsonObjectConst>()) {
     String name = kv.key().c_str();
     JsonObjectConst in = kv.value().as<JsonObjectConst>();
@@ -301,6 +326,8 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
     case MQTT_EVENT_CONNECTED:
       connected = true;
       lastMsg = millis();
+      Serial.printf("[hydros] AWS IoT connected (%s), asking %u controller(s) for status\n", wsHost.c_str(),
+                    (unsigned)things.size());
       for (auto &t : things) {
         String rspT = userId + "/" + t.id + "/rsp/#";
         String reqT = userId + "/" + t.id + "/req/LISTEN/statusc";
@@ -310,6 +337,13 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
       break;
     case MQTT_EVENT_DISCONNECTED:
       connected = false;
+      Serial.println("[hydros] AWS IoT disconnected");
+      break;
+    case MQTT_EVENT_ERROR:
+      if (e->error_handle)
+        Serial.printf("[hydros] AWS IoT error: type %d, tls 0x%x, errno %d, refused %d\n",
+                      (int)e->error_handle->error_type, (unsigned)e->error_handle->esp_tls_last_esp_err,
+                      e->error_handle->esp_transport_sock_errno, (int)e->error_handle->connect_return_code);
       break;
     case MQTT_EVENT_DATA: {
       if (e->current_data_offset == 0) {
@@ -373,7 +407,7 @@ void loop() {
   const Settings &s = settings::get();
   if (!s.hydrosOn || s.mode != "direct") {
     if (client) stopClient();
-    state = s.hydrosOn ? "on (used in direct mode)" : "off";
+    setState(s.hydrosOn ? "on (used in direct mode)" : "off");
     return;
   }
   uint32_t now = millis();
@@ -383,36 +417,38 @@ void loop() {
     bool dropped = !connected && now - sessionStart > 30000;
     if (expired || silent || dropped) {
       stopClient();
-      state = expired ? "renewing login" : silent ? "no data for 10 min, reconnecting" : "connection dropped, retrying";
+      setState(expired ? "renewing login" : silent ? "no data for 10 min, reconnecting" : "connection dropped, retrying");
       nextTry = now + (dropped ? backoff : 1000);
       if (dropped) backoff = min<uint32_t>(backoff * 2, 10UL * 60UL * 1000UL);
     } else {
       if (connected) {
         backoff = 15000;
-        state = "ok · " + String(things.size()) + " controller" + (things.size() == 1 ? "" : "s");
+        setState("ok · " + String(things.size()) + " controller" + (things.size() == 1 ? "" : "s"));
       } else {
-        state = "connecting to AWS IoT";
+        setState("connecting to AWS IoT");
       }
     }
     return;
   }
   if ((int32_t)(now - nextTry) < 0) return;
   if (!s.hydrosUser.length() || !s.hydrosPass.length()) {
-    state = "e-mail and password needed";
+    setState("e-mail and password needed");
     nextTry = now + 30000;
     return;
   }
-  state = "logging in";
+  setState("logging in");
   String err = connectSteps(s.hydrosUser, s.hydrosPass, false, nullptr);
   if (err.length()) {
-    state = err;
+    setState(err);
     nextTry = now + backoff;
     backoff = min<uint32_t>(backoff * 2, 10UL * 60UL * 1000UL);
     return;
   }
+  Serial.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s\n", (unsigned)things.size(),
+                things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str());
   sessionStart = millis();
   if (!startClient()) {
-    state = "MQTT start failed";
+    setState("MQTT start failed");
     stopClient();
     nextTry = now + backoff;
   }

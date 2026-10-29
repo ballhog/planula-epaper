@@ -101,6 +101,7 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
   switch ((esp_mqtt_event_id_t)id) {
     case MQTT_EVENT_CONNECTED: {
       isConnected = true;
+      Serial.printf("[coeno] connected to %s\n", uri.c_str());
       String h = hello(true);
       esp_mqtt_client_publish(e->client, (prefix + "hello").c_str(), h.c_str(), h.length(), 1, 1);
       esp_mqtt_client_subscribe(e->client, (prefix + "page/+").c_str(), 1);
@@ -174,6 +175,7 @@ void start() {
   esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, onEvent, nullptr);
   esp_mqtt_client_start(client);
   activeKey = s.name + "@" + uri;
+  Serial.printf("[coeno] connecting to %s (clear the Coeno address to stop)\n", uri.c_str());
 }
 
 }  // namespace
