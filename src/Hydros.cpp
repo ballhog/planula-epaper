@@ -19,6 +19,8 @@ namespace hydros {
 
 namespace {
 
+const char *kEndpointKeys[] = {"iotEndpoint", "iot_endpoint", "mqttEndpoint", "mqtt_endpoint", "awsIotEndpoint",
+                               "aws_iot_endpoint", "iotEndpointAddress"};
 const char *kClientId = "3au5f4m5juu58qks62mcd89730";  // Hydros app (from pyhydros)
 const char *kApi = "https://cv.hydros.link";
 const uint32_t kRebuildMs = 50UL * 60UL * 1000UL;
@@ -66,13 +68,11 @@ String amzDate() {
 }
 
 String findEndpoint(JsonVariantConst v) {
-  const char *keys[] = {"iotEndpoint", "iot_endpoint", "mqttEndpoint", "mqtt_endpoint", "awsIotEndpoint",
-                        "aws_iot_endpoint", "iotEndpointAddress"};
-  for (const char *k : keys)
+  for (const char *k : kEndpointKeys)
     if (v[k].is<const char *>()) return v[k].as<const char *>();
   for (JsonPairConst kv : v.as<JsonObjectConst>())
     if (kv.value().is<JsonObjectConst>())
-      for (const char *k : keys)
+      for (const char *k : kEndpointKeys)
         if (kv.value()[k].is<const char *>()) return kv.value()[k].as<const char *>();
   return "";
 }
@@ -116,9 +116,30 @@ Login login(const String &user, const String &pass) {
   return L;
 }
 
-https::Result api(const String &path, const String &idToken) {
-  return https::request("GET", String(kApi) + path, {{"Authorization", idToken}, {"Content-Type", "application/json"}},
-                        "", 65536);
+// Only what the panel uses survives the download: the profile and thing
+// replies can be large (every controller's whole setup).
+void endpointFilter(JsonObject f) {
+  for (const char *k : kEndpointKeys) {
+    f[k] = true;
+    f["*"][k] = true;  // one level down, like pyhydros looks
+  }
+}
+
+https::Result api(const String &path, const String &idToken, JsonDocument &out, bool profile) {
+  JsonDocument filter;
+  JsonObject f = filter.to<JsonObject>();
+  endpointFilter(f);
+  if (profile) {
+    f["generated_user_id"] = true;
+    JsonObject t = f["things"][0].to<JsonObject>();
+    for (const char *k : {"thingName", "id", "thingId", "friendlyName", "name", "thingType", "parent", "parentThing"})
+      t[k] = true;
+  } else {
+    f["cognito_identity"] = true;
+    f["parent"] = true;
+  }
+  return https::requestJson("GET", String(kApi) + path,
+                            {{"Authorization", idToken}, {"Content-Type", "application/json"}}, "", out, &filter);
 }
 
 // Steps 1-4. On success fills things, userId, wsHost, wsPath.
@@ -128,11 +149,11 @@ String connectSteps(const String &user, const String &pass, bool forTest, String
   Login L = login(user, pass);
   if (L.error.length()) return L.error;
 
-  https::Result u = api("/user", L.idToken);
-  if (u.status != 200) return "Hydros /user failed (HTTP " + String(u.status) + ")";
   JsonDocument ud;
-  if (deserializeJson(ud, u.body)) return "Hydros /user: bad reply";
-  u.body = String();
+  https::Result u = api("/user", L.idToken, ud, true);
+  if (u.status < 0) return "Hydros /user: " + u.error;
+  if (u.status != 200) return "Hydros /user failed (HTTP " + String(u.status) + ")";
+  if (u.error.length()) return "Hydros /user: bad reply (" + u.error + ")";
   String uid = ud["generated_user_id"] | "";
   if (!uid.length()) return "Hydros /user: no user id";
   String endpoint = findEndpoint(ud.as<JsonVariantConst>());
@@ -160,18 +181,16 @@ String connectSteps(const String &user, const String &pass, bool forTest, String
   things = top;  // only touched while no MQTT client exists (loop() calls this between sessions)
   userId = uid;
 
-  https::Result t = api(String("/thing/") + sigv4::uriEncode(top[0].id.c_str()).c_str(), L.idToken);
-  if (t.status != 200) return "Hydros /thing failed (HTTP " + String(t.status) + ")";
   JsonDocument td;
-  deserializeJson(td, t.body);
-  t.body = String();
+  https::Result t = api(String("/thing/") + sigv4::uriEncode(top[0].id.c_str()).c_str(), L.idToken, td, false);
+  if (t.status != 200) return "Hydros /thing failed (HTTP " + String(t.status) + ")";
+  if (t.error.length()) return "Hydros /thing: bad reply (" + t.error + ")";
   String identity = td["cognito_identity"] | "";
   String parent = td["parent"] | "";
   if (!endpoint.length()) endpoint = findEndpoint(td.as<JsonVariantConst>());
   if (!identity.length() && parent.length()) {
-    https::Result p = api("/thing/" + parent, L.idToken);
     JsonDocument pd;
-    deserializeJson(pd, p.body);
+    api("/thing/" + parent, L.idToken, pd, false);
     identity = pd["cognito_identity"] | "";
     if (!endpoint.length()) endpoint = findEndpoint(pd.as<JsonVariantConst>());
   }
