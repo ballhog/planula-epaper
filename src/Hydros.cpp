@@ -252,66 +252,30 @@ float numberOf(JsonVariantConst v) {
   return NAN;
 }
 
-// Streaming zlib → ArduinoJson reader. The decompressor (~11 kB) and its
-// 32 kB window are allocated on first use and kept, so a long session doesn't
-// fragment the heap message by message.
-struct InflateReader {
+// zlib inflate into a fixed buffer. Hydros status messages inflate to ~8.5 kB
+// (measured on Joe's two controllers, 2026-10-29), so a 16 kB output buffer
+// in non-wrapping mode does the job without the 32 kB sliding window; the
+// decompressor (~11 kB) and buffer are allocated once at boot.
+struct Inflater {
+  static constexpr size_t kOut = 16 * 1024;
   tinfl_decompressor *d = nullptr;
-  uint8_t *dict = nullptr;
-  const uint8_t *in = nullptr;
-  size_t inLeft = 0;
-  size_t outPos = 0, readPos = 0, readEnd = 0;  // window positions
-  size_t produced = 0;                           // inflated bytes this message
-  bool done = false, failed = false;
-  int status = 0;
-
+  uint8_t *out = nullptr;
   bool ready() {
-    // Window first: it needs the bigger contiguous block.
-    if (!dict) dict = (uint8_t *)malloc(TINFL_LZ_DICT_SIZE);
+    if (!out) out = (uint8_t *)malloc(kOut);
     if (!d) d = (tinfl_decompressor *)malloc(sizeof(tinfl_decompressor));
-    return d && dict;
+    return d && out;
   }
-  void start(const uint8_t *data, size_t n) {
+  // Returns the inflated length, or -1 (status in *st).
+  long run(const uint8_t *in, size_t n, int *st) {
     tinfl_init(d);
-    in = data;
-    inLeft = n;
-    outPos = readPos = readEnd = produced = 0;
-    done = failed = false;
-    status = 0;
-  }
-  bool refill() {
-    if (done) return false;
-    size_t inSize = inLeft, outSize = TINFL_LZ_DICT_SIZE - outPos;
-    tinfl_status st = tinfl_decompress(d, in, &inSize, dict, dict + outPos, &outSize,
-                                       TINFL_FLAG_PARSE_ZLIB_HEADER | (inLeft > inSize ? TINFL_FLAG_HAS_MORE_INPUT : 0));
-    in += inSize;
-    inLeft -= inSize;
-    readPos = outPos;
-    readEnd = outPos + outSize;
-    produced += outSize;
-    outPos = (outPos + outSize) & (TINFL_LZ_DICT_SIZE - 1);
-    status = (int)st;
-    if (st == TINFL_STATUS_DONE) done = true;
-    else if (st < 0) { failed = true; done = true; }
-    else if (st == TINFL_STATUS_NEEDS_MORE_INPUT && inLeft == 0) { failed = true; done = true; }
-    return readEnd > readPos;
-  }
-  int read() {
-    while (readPos >= readEnd)
-      if (!refill()) return -1;
-    return dict[readPos++];
-  }
-  size_t readBytes(char *b, size_t n) {
-    size_t k = 0;
-    while (k < n) {
-      int c = read();
-      if (c < 0) break;
-      b[k++] = (char)c;
-    }
-    return k;
+    size_t inSize = n, outSize = kOut;
+    tinfl_status s = tinfl_decompress(d, in, &inSize, out, out, &outSize,
+                                      TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    *st = (int)s;
+    return s == TINFL_STATUS_DONE ? (long)outSize : -1;
   }
 };
-InflateReader inflater;
+Inflater inflater;
 
 void handlePayload(const String &topic, uint8_t *data, size_t len) {
   // "<user>/<thing>/rsp/LISTEN/statusc/<mac>"
@@ -343,15 +307,14 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
       Serial.printf("[hydros] no memory to inflate (largest free block %u bytes)\n", (unsigned)ESP.getMaxAllocHeap());
       return;
     }
-    inflater.start(p, n);
-    err = deserializeJson(doc, inflater, DeserializationOption::Filter(filter));
-    while (inflater.read() >= 0) {}  // finish, so `produced` is the full size
-    static uint32_t sizeLogs = 0;
-    if (sizeLogs++ < 3) Serial.printf("[hydros] inflated %u -> %u bytes\n", (unsigned)n, (unsigned)inflater.produced);
-    if (inflater.failed) {
-      Serial.printf("[hydros] %s: zlib failed (%d)\n", topic.c_str(), inflater.status);
+    int st = 0;
+    long m = inflater.run(p, n, &st);
+    if (m < 0) {
+      Serial.printf("[hydros] %s: zlib failed (%d%s)\n", topic.c_str(), st,
+                    st == TINFL_STATUS_HAS_MORE_OUTPUT ? ", inflates to more than 16 kB" : "");
       return;
     }
+    err = deserializeJson(doc, (const char *)inflater.out, (size_t)m, DeserializationOption::Filter(filter));
   } else {
     err = deserializeJson(doc, (const char *)p, n, DeserializationOption::Filter(filter));
   }
@@ -534,8 +497,9 @@ void loop() {
     return;
   }
   setState("logging in");
-  Serial.printf("[mem] before Hydros login: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
-                (unsigned)ESP.getMaxAllocHeap());
+  Serial.printf("[mem] before Hydros login: 8-bit free %u, largest %u\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   String err = connectSteps(s.hydrosUser, s.hydrosPass, false, nullptr);
   if (err.length()) {
     setState(err);

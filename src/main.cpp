@@ -586,8 +586,11 @@ void loop() {
   }
   if (now - lastState > 60000UL) {
     lastState = now;
-    Serial.printf("[mem] free %u, largest block %u, lowest %u\n", (unsigned)ESP.getFreeHeap(),
-                  (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
+    // 8-bit-capable RAM is what TLS, Wi-Fi and the page can use (getFreeHeap
+    // also counts IRAM that only takes 32-bit words).
+    Serial.printf("[mem] free %u (8-bit %u), largest 8-bit block %u, lowest %u\n", (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (unsigned)ESP.getMinFreeHeap());
     publishState();
   }
   if (rebootAsked && (int32_t)(now - rebootAt) > 0) ESP.restart();
