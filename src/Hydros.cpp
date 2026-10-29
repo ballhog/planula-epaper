@@ -534,8 +534,16 @@ void loginFinished(uint32_t now) {
 
 void loop() {
   const Settings &s = settings::get();
+  if (loginDone) {
+    // Start the session and come back next pass. (Build 17 carried on with a
+    // `now` read before sessionStart was set: now - sessionStart wrapped to
+    // ~49 days, so every new session looked expired and dropped, was torn
+    // down right after subscribing, and the backoff doubled until Hydros
+    // stopped trying.)
+    loginFinished(millis());
+    return;
+  }
   uint32_t now = millis();
-  if (loginDone) loginFinished(now);
   if (!s.hydrosOn || s.mode != "direct") {
     if (client) stopClient();
     setState(s.hydrosOn ? "on (used in direct mode)" : "off");
@@ -550,9 +558,12 @@ void loop() {
       nextTry = now + 1000;
       return;
     }
-    bool expired = now - sessionStart > kRebuildMs;
-    bool silent = connected && now - lastMsg > kSilentMs;
-    bool dropped = !connected && now - sessionStart > 30000;
+    // Signed differences: lastMsg is written by the MQTT task and can be a
+    // little newer than `now`; unsigned it would wrap to "silent for 49 days".
+    int32_t sinceStart = (int32_t)(now - sessionStart), sinceMsg = (int32_t)(now - lastMsg);
+    bool expired = sinceStart > (int32_t)kRebuildMs;
+    bool silent = connected && sinceMsg > (int32_t)kSilentMs;
+    bool dropped = !connected && sinceStart > 30000;
     if (expired || silent || dropped) {
       stopClient();
       setState(expired ? "renewing login" : silent ? "no data for 10 min, reconnecting" : "connection dropped, retrying");
@@ -616,10 +627,10 @@ String test(const String &user, const String &pass) {
 }
 
 String status() {
-  if (connected && lastMsg) return state + " · last data " + String((millis() - lastMsg) / 1000) + " s ago";
+  if (connected && lastMsg) return state + " · last data " + String((uint32_t)max<int32_t>(0, (int32_t)(millis() - lastMsg)) / 1000) + " s ago";
   return state;
 }
-bool ok() { return connected && lastMsg && millis() - lastMsg < kSilentMs; }
+bool ok() { return connected && lastMsg && (int32_t)(millis() - lastMsg) < (int32_t)kSilentMs; }
 uint32_t lastMsgMs() { return lastMsg; }
 
 }  // namespace hydros

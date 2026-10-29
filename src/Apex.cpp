@@ -157,7 +157,7 @@ String test(const String &host, const String &user, const String &pass) {
 }
 
 String status() {
-  if (okNow && lastOk) return state.get() + " · " + String((millis() - lastOk) / 1000) + " s ago";
+  if (okNow && lastOk) return state.get() + " · " + String((uint32_t)max<int32_t>(0, (int32_t)(millis() - lastOk)) / 1000) + " s ago";
   return state.get();
 }
 bool ok() { return okNow; }

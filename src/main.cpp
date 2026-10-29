@@ -178,7 +178,7 @@ void fillChrome(panel::Chrome &c) {
     if (s.apexOn) left += String("Apex ") + (apex::ok() ? "ok" : "offline");
     if (s.hydrosOn) left += String(left.length() ? " · " : "") + "Hydros " + (hydros::ok() ? "ok" : "offline");
     if (!left.length()) left = "Direct mode: no source switched on";
-    alert = (s.apexOn && !apex::ok() && millis() - apex::lastOkMs() > s.stale_s * 1000UL) ||
+    alert = (s.apexOn && !apex::ok() && (int32_t)(millis() - apex::lastOkMs()) > (int32_t)(s.stale_s * 1000UL)) ||
             (s.hydrosOn && !hydros::ok() && millis() > 180000UL);
   }
   if (net::online()) right = "Wi-Fi " + String(net::rssi()) + " dBm";
