@@ -13,7 +13,9 @@ namespace display {
 
 namespace {
 
-constexpr int16_t kBand = 120;  // 4 bands of 12 kB
+// 4 bands of 12 kB on the plain ESP32; with PSRAM (reTerminal) one 48 kB band,
+// i.e. the whole frame, drawn once.
+int16_t kBand = 120;
 panel::BandCanvas *cv = nullptr;
 GxEPD2_EPD *epd = nullptr;
 Scene last;
@@ -71,7 +73,17 @@ void push(bool full, bool inverted = false) {
 }  // namespace
 
 void begin(const String &driver) {
+  if (psramFound()) kBand = panel::kH;
   cv = new panel::BandCanvas(panel::kW, panel::kH, kBand);
+  if (!cv->ok() && kBand == panel::kH) {  // no room after all: back to bands
+    delete cv;
+    kBand = 120;
+    cv = new panel::BandCanvas(panel::kW, panel::kH, kBand);
+  }
+  if (PIN_SD_CS >= 0) {  // keep the microSD card off the shared bus
+    pinMode(PIN_SD_CS, OUTPUT);
+    digitalWrite(PIN_SD_CS, HIGH);
+  }
   // CS, DC and RST are plain GPIOs that GxEPD2 drives itself. Don't hand CS to
   // the SPI peripheral (SPI.begin's ss argument): the core then refuses
   // digitalWrite on it and the panel is never selected (build 1 bug).
@@ -84,8 +96,13 @@ void begin(const String &driver) {
   pinMode(PIN_BUSY, INPUT);
   SPI.end();
   SPI.begin(PIN_SCK, -1, PIN_MOSI, -1);
+#if defined(BOARD_RETERMINAL)
+  (void)driver;  // its panel is always the GDEY075T7
+  epd = new GxEPD2_750_GDEY075T7(PIN_CS, PIN_DC, PIN_RST, PIN_BUSY);
+#else
   if (driver == "gdey") epd = new GxEPD2_750_GDEY075T7(PIN_CS, PIN_DC, PIN_RST, PIN_BUSY);
   else epd = new GxEPD2_750_T7(PIN_CS, PIN_DC, PIN_RST, PIN_BUSY);
+#endif
   // Waveshare boards want a 2 ms reset pulse.
   epd->init(115200, true, 2, false);
 }

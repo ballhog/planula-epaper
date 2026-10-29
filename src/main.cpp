@@ -398,7 +398,12 @@ void netUpload() {
 // Updates: Coeno first (LAN); when Coeno doesn't answer, GitHub releases
 // (ballhog/planula-epaper, built by .github/workflows/release.yml). Either way
 // SHA-256 checked, and the new build must prove itself or it rolls back.
+// One manifest per firmware image: latest.json (ESP32 board), latest-s3.json (reTerminal).
+#if defined(BOARD_RETERMINAL)
+const char *kGithubManifest = "https://github.com/ballhog/planula-epaper/releases/latest/download/latest-s3.json";
+#else
 const char *kGithubManifest = "https://github.com/ballhog/planula-epaper/releases/latest/download/latest.json";
+#endif
 String availSource, availUrl, availSha;
 size_t availSize = 0;
 
@@ -415,7 +420,7 @@ void checkUpdates() {
   availSource = "";
   String coenoWhy;
   if (s.coenoUpdates && s.coenoHost.length()) {
-    String url = "http://" + s.coenoHost + ":8000/firmware/planula-epaper/latest.json";
+    String url = "http://" + s.coenoHost + ":8000/firmware/" FW_IMAGE "/latest.json";
     long b = ota_check(url.c_str());
     if (b > 0) {
       availBuild = b;
@@ -468,7 +473,7 @@ void installUpdate() {
     ESP.restart();
   }
   const Settings &s = settings::get();
-  String url = "http://" + s.coenoHost + ":8000/firmware/planula-epaper/latest.json";
+  String url = "http://" + s.coenoHost + ":8000/firmware/" FW_IMAGE "/latest.json";
   showUpdating("Coeno");
   if (!ota_check_and_apply(url.c_str(), nullptr)) {
     updatingFrom = nullptr;

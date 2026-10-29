@@ -1,5 +1,6 @@
 # Build Planula-ePaper on every push to main and publish it as a GitHub release
-# "build-<N>" with planula-epaper-<N>.bin + latest.json. Panels that can't reach
+# "build-<N>" with planula-epaper-<N>.bin + latest.json (Waveshare ESP32 board)
+# and planula-epaper-s3-<N>.bin + latest-s3.json (Seeed reTerminal E1001). Panels that can't reach
 # Coeno update from here: they read
 #   https://github.com/ballhog/planula-epaper/releases/latest/download/latest.json
 #   {"build": N, "version": "...", "url": ".../planula-epaper-N.bin", "sha256": "...", "size": n}
@@ -47,7 +48,7 @@ jobs:
       - name: Build
         run: |
           pip install -q platformio pillow
-          pio run -e epaper
+          pio run -e epaper -e reterminal
           echo "BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
           echo "VERSION=$(git describe --tags --always)" >> "$GITHUB_ENV"
 
@@ -59,14 +60,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bin="planula-epaper-${BUILD}.bin"
-          cp .pio/build/epaper/firmware.bin "$bin"
-          sha=$(sha256sum "$bin" | cut -d' ' -f1)
-          size=$(stat -c %s "$bin")
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/build-${BUILD}/${bin}"
-          printf '{"build": %s, "version": "%s", "url": "%s", "sha256": "%s", "size": %s}\n' \
-            "$BUILD" "$VERSION" "$url" "$sha" "$size" > latest.json
-          cat latest.json
-          gh release create "build-${BUILD}" "$bin" latest.json \
+          manifest() {  # env image-name manifest-file
+            local bin="$2-${BUILD}.bin"
+            cp ".pio/build/$1/firmware.bin" "$bin"
+            local sha size url
+            sha=$(sha256sum "$bin" | cut -d' ' -f1)
+            size=$(stat -c %s "$bin")
+            url="https://github.com/${GITHUB_REPOSITORY}/releases/download/build-${BUILD}/${bin}"
+            printf '{"build": %s, "version": "%s", "url": "%s", "sha256": "%s", "size": %s}\n' \
+              "$BUILD" "$VERSION" "$url" "$sha" "$size" > "$3"
+            cat "$3"
+          }
+          manifest epaper planula-epaper latest.json            # Waveshare ESP32 board
+          manifest reterminal planula-epaper-s3 latest-s3.json  # Seeed reTerminal E1001
+          gh release create "build-${BUILD}" planula-epaper-${BUILD}.bin planula-epaper-s3-${BUILD}.bin latest.json latest-s3.json \
             --title "Build ${BUILD}" --notes "$(git log -1 --pretty=%B)" --latest
           echo "Released build ${BUILD} (${VERSION})" >> "$GITHUB_STEP_SUMMARY"

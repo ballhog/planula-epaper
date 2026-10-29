@@ -17,8 +17,15 @@
 
 namespace display {
 
+#if defined(BOARD_RETERMINAL)
+// Seeed reTerminal E1001. The microSD card shares SCK/MOSI; its CS (14) is held high.
+constexpr int PIN_SCK = 7, PIN_MOSI = 9, PIN_CS = 10, PIN_RST = 12, PIN_DC = 11, PIN_BUSY = 13;
+constexpr int PIN_SD_CS = 14;
+#else
 // Board pins (Waveshare e-Paper ESP32 Driver Board, same on Rev 2/3).
 constexpr int PIN_SCK = 13, PIN_MOSI = 14, PIN_CS = 15, PIN_RST = 26, PIN_DC = 27, PIN_BUSY = 25;
+constexpr int PIN_SD_CS = -1;
+#endif
 
 void begin(const String &driver);  // "t7" or "gdey"
 using Scene = std::function<void(Adafruit_GFX &)>;
