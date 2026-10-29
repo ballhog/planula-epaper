@@ -518,6 +518,14 @@ void loop() {
   } else if (!err.length()) {
     tlsMemFails = 0;
   }
+  if (err.length() && time(nullptr) < 1700000000) {
+    // No clock yet (just booted): SigV4 needs it. Look again in a second rather
+    // than waiting out the 15-30 s login backoff (build 15 took a minute to
+    // show Hydros data after every restart because of this).
+    setState(err);
+    nextTry = now + 1000;
+    return;
+  }
   if (err.length()) {
     setState(err);
     nextTry = now + backoff;
@@ -563,8 +571,17 @@ void restart() {
 }
 
 String test(const String &user, const String &pass) {
+  const Settings &s = settings::get();
+  // Same login as the running session and it's streaming: that is the test.
+  // A second TLS session next to the live one doesn't fit in RAM.
+  if (user == s.hydrosUser && pass == s.hydrosPass && ok())
+    return "ok · signed in and streaming (" + String(things.size()) + " controller" +
+           (things.size() == 1 ? "" : "s") + ")";
+  bool was = pause(true);
   String summary;
   String err = connectSteps(user, pass, true, &summary);
+  pause(false);
+  (void)was;
   return err.length() ? err : "ok · " + summary;
 }
 

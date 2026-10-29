@@ -463,7 +463,10 @@ void installUpdate() {
 void updates() {
   const Settings &s = settings::get();
   if (!net::online()) return;
-  bool due = checkAsked || (millis() > 90000 && (!lastCheck || millis() - lastCheck > 6UL * 3600UL * 1000UL));
+  // First check as soon as Wi-Fi is up, before Hydros has opened its session
+  // (build 15 checked at 90 s, which tore down the first Hydros session
+  // mid-start), then every 6 h.
+  bool due = checkAsked || !lastCheck || millis() - lastCheck > 6UL * 3600UL * 1000UL;
   if (due) {
     checkAsked = false;
     lastCheck = millis();
@@ -569,8 +572,8 @@ void loop() {
   button();
   coeno::loop();
   apex::loop();
+  updates();  // before Hydros: the boot-time check runs before its session opens
   hydros::loop();
-  updates();
   netUpload();
   ota_tick();
 
