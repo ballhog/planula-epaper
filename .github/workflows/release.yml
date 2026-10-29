@@ -1,0 +1,72 @@
+# Build Planula-ePaper on every push to main and publish it as a GitHub release
+# "build-<N>" with planula-epaper-<N>.bin + latest.json. Panels that can't reach
+# Coeno update from here: they read
+#   https://github.com/ballhog/planula-epaper/releases/latest/download/latest.json
+#   {"build": N, "version": "...", "url": ".../planula-epaper-N.bin", "sha256": "...", "size": n}
+# and check the SHA-256 before switching (and roll back if the build never draws).
+#
+# Public builds carry no secrets: no network-upload password is compiled in, so
+# a released build doesn't listen for "pio run -e epaper-net" uploads (builds
+# made on the Mac with CALYX_OTA_PASS set still do). For Coeno, copy the .bin
+# with ./publish.sh as before.
+#
+# Build number = commit count, so history must be complete (fetch-depth: 0).
+name: release firmware
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'lib/**', 'include/**', 'web/**', 'platformio.ini', 'version.py', 'tools/embed_web.py']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-firmware
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini') }}
+
+      - name: Build
+        run: |
+          pip install -q platformio pillow
+          pio run -e epaper
+          echo "BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+          echo "VERSION=$(git describe --tags --always)" >> "$GITHUB_ENV"
+
+      - name: Host tests (renderer, page JSON, SigV4)
+        run: tools/host/render.sh
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bin="planula-epaper-${BUILD}.bin"
+          cp .pio/build/epaper/firmware.bin "$bin"
+          sha=$(sha256sum "$bin" | cut -d' ' -f1)
+          size=$(stat -c %s "$bin")
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/build-${BUILD}/${bin}"
+          printf '{"build": %s, "version": "%s", "url": "%s", "sha256": "%s", "size": %s}\n' \
+            "$BUILD" "$VERSION" "$url" "$sha" "$size" > latest.json
+          cat latest.json
+          gh release create "build-${BUILD}" "$bin" latest.json \
+            --title "Build ${BUILD}" --notes "$(git log -1 --pretty=%B)" --latest
+          echo "Released build ${BUILD} (${VERSION})" >> "$GITHUB_STEP_SUMMARY"

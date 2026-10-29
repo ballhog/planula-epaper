@@ -17,6 +17,7 @@ namespace hydros {
 
 void loop();
 void restart();     // drop the session; loop() logs in again
+void reserve();     // grab the 43 kB inflate buffers early, before the heap fragments
 String test(const String &user, const String &pass);  // login + list controllers
 String status();
 bool ok();

@@ -264,8 +264,9 @@ struct InflateReader {
   int status = 0;
 
   bool ready() {
-    if (!d) d = (tinfl_decompressor *)malloc(sizeof(tinfl_decompressor));
+    // Window first: it needs the bigger contiguous block.
     if (!dict) dict = (uint8_t *)malloc(TINFL_LZ_DICT_SIZE);
+    if (!d) d = (tinfl_decompressor *)malloc(sizeof(tinfl_decompressor));
     return d && dict;
   }
   void start(const uint8_t *data, size_t n) {
@@ -542,6 +543,11 @@ void loop() {
     stopClient();
     nextTry = now + backoff;
   }
+}
+
+void reserve() {
+  if (!inflater.ready())
+    Serial.printf("[hydros] couldn't reserve inflate memory (largest block %u)\n", (unsigned)ESP.getMaxAllocHeap());
 }
 
 void restart() {

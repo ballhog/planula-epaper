@@ -27,4 +27,8 @@ Result request(const char *method, const String &url, const Headers &headers, co
 Result requestJson(const char *method, const String &url, const Headers &headers, const String &body,
                    JsonDocument &out, const JsonDocument *filter, int timeoutMs = 20000);
 
+// Download url (following redirects) into the inactive app slot, checking the
+// SHA-256 before switching. progress(pct) is optional. Returns "" or an error.
+String downloadFirmware(const String &url, const String &sha256Hex, size_t size, void (*progress)(int pct));
+
 }  // namespace https

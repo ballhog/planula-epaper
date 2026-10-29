@@ -53,6 +53,9 @@ void toJson(JsonObject o, bool with) {
   c["host"] = s.coenoHost;
   c["port"] = s.coenoPort;
   c["updates"] = s.coenoUpdates;
+  JsonObject u = o["updates"].to<JsonObject>();
+  u["github"] = s.githubUpdates;
+  u["auto"] = s.autoUpdate;
   JsonObject a = o["apex"].to<JsonObject>();
   a["on"] = s.apexOn;
   a["host"] = s.apexHost;
@@ -134,6 +137,11 @@ String applyJson(JsonObjectConst o) {
     if (c["host"].is<const char *>()) s.coenoHost = c["host"].as<const char *>();
     if (c["port"].is<int>()) s.coenoPort = c["port"];
     if (c["updates"].is<bool>()) s.coenoUpdates = c["updates"];
+  }
+  if (o["updates"].is<JsonObjectConst>()) {
+    JsonObjectConst u = o["updates"];
+    if (u["github"].is<bool>()) s.githubUpdates = u["github"];
+    if (u["auto"].is<bool>()) s.autoUpdate = u["auto"];
   }
   if (o["apex"].is<JsonObjectConst>()) {
     JsonObjectConst a = o["apex"];

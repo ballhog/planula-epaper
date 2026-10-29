@@ -11,6 +11,7 @@
 //              hold 25 s = erase all settings
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <ArduinoOTA.h>
 #include <WiFi.h>
 #include <time.h>
 
@@ -21,6 +22,7 @@
 #include "CoenoLink.h"
 #include "DirectPages.h"
 #include "Display.h"
+#include "Https.h"
 #include "Hydros.h"
 #include "Net.h"
 #include "Render.h"
@@ -320,35 +322,138 @@ void button() {
   wasDown = down;
 }
 
-void updates() {
+// Network upload from the Mac: pio run -e epaper-net -t upload
+// (password = CALYX_OTA_PASS at build time; empty = no password).
+bool otaStarted = false;
+void netUpload() {
+#ifdef OTA_PASSWORD
+  // No password compiled in (e.g. a public GitHub release build): no listener,
+  // so nobody on the network can push firmware without it.
+  if (!strlen(OTA_PASSWORD)) return;
+#else
+  return;
+#endif
+  if (!net::online()) return;
+  if (!otaStarted) {
+    ArduinoOTA.setHostname(settings::get().name.c_str());
+    ArduinoOTA.setMdnsEnabled(false);  // Net.cpp already runs mDNS
+#ifdef OTA_PASSWORD
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+#endif
+    ArduinoOTA.onStart([] {
+      Serial.println("[update] network upload started");
+      panel::Chrome c;
+      panel::renderMessage(display::canvas(), "Updating firmware", "Receiving from the Mac. Don't unplug the panel.", "", c);
+      display::show(false);
+    });
+    ArduinoOTA.onEnd([] {
+      Serial.println("[update] network upload done");
+      ota_mark_pending();
+    });
+    ArduinoOTA.onError([](ota_error_t e) { Serial.printf("[update] network upload failed (%d)\n", (int)e); });
+    ArduinoOTA.begin();
+    otaStarted = true;
+  }
+  ArduinoOTA.handle();
+}
+
+// Updates: Coeno first (LAN); when Coeno doesn't answer, GitHub releases
+// (ballhog/planula-epaper, built by .github/workflows/release.yml). Either way
+// SHA-256 checked, and the new build must prove itself or it rolls back.
+const char *kGithubManifest = "https://github.com/ballhog/planula-epaper/releases/latest/download/latest.json";
+String availSource, availUrl, availSha;
+size_t availSize = 0;
+
+void showUpdating(const char *from) {
+  panel::Chrome c;
+  fillChrome(c);
+  String body = String("Downloading from ") + from + ". Don't unplug the panel.\nIt restarts by itself when done.";
+  panel::renderMessage(display::canvas(), "Updating firmware", body.c_str(), "", c);
+  display::show(false);
+}
+
+void checkUpdates() {
   const Settings &s = settings::get();
-  if (!net::online() || !s.coenoUpdates || !s.coenoHost.length()) return;
-  String url = "http://" + s.coenoHost + ":8000/firmware/planula-epaper/latest.json";
-  bool due = checkAsked || (millis() > 60000 && (!lastCheck || millis() - lastCheck > 6UL * 3600UL * 1000UL));
-  if (due) {
-    checkAsked = false;
-    lastCheck = millis();
+  availBuild = 0;
+  availSource = "";
+  String coenoWhy;
+  if (s.coenoUpdates && s.coenoHost.length()) {
+    String url = "http://" + s.coenoHost + ":8000/firmware/planula-epaper/latest.json";
     long b = ota_check(url.c_str());
     if (b > 0) {
       availBuild = b;
-      updateText = "build " + String(b) + " is ready to install";
-    } else if (b == 0) {
-      availBuild = 0;
-      updateText = "up to date (build " + String(FW_BUILD) + ")";
-    } else {
-      updateText = String("can't check: ") + ota_last_reason();
+      availSource = "coeno";
+      updateText = "build " + String(b) + " ready on Coeno";
+      return;
     }
+    if (b == 0 && ota_last_http() != 404) {
+      updateText = "up to date (build " + String(FW_BUILD) + ", Coeno)";
+      return;
+    }
+    coenoWhy = String("Coeno: ") + ota_last_reason() + "; ";
+  }
+  if (!s.githubUpdates) {
+    updateText = coenoWhy.length() ? coenoWhy + "GitHub updates off" : "update checks off";
+    return;
+  }
+  JsonDocument m;
+  https::Result r = https::requestJson("GET", kGithubManifest, {{"Accept", "application/json"}}, "", m, nullptr);
+  if (r.status != 200 || r.error.length()) {
+    updateText = coenoWhy + "GitHub: " + (r.status < 0 ? r.error : "HTTP " + String(r.status));
+    return;
+  }
+  long b = m["build"] | 0L;
+  if (b > FW_BUILD && m["url"].is<const char *>()) {
+    availBuild = b;
+    availSource = "github";
+    availUrl = m["url"].as<const char *>();
+    availSha = m["sha256"] | "";
+    availSize = m["size"] | 0;
+    updateText = "build " + String(b) + " ready on GitHub";
+  } else {
+    updateText = coenoWhy + "up to date (build " + String(FW_BUILD) + ", GitHub)";
+  }
+}
+
+void installUpdate() {
+  if (availSource == "github") {
+    showUpdating("GitHub");
+    String e = https::downloadFirmware(availUrl, availSha, availSize, nullptr);
+    if (e.length()) {
+      updateText = "update failed: " + e;
+      app::redraw(false);
+      return;
+    }
+    ota_mark_pending();
+    Serial.printf("[update] build %ld from GitHub installed, restarting\n", availBuild);
+    delay(300);
+    ESP.restart();
+  }
+  const Settings &s = settings::get();
+  String url = "http://" + s.coenoHost + ":8000/firmware/planula-epaper/latest.json";
+  showUpdating("Coeno");
+  if (!ota_check_and_apply(url.c_str(), nullptr)) {
+    updateText = String("update failed: ") + ota_last_reason();
+    app::redraw(false);
+  }
+}
+
+void updates() {
+  const Settings &s = settings::get();
+  if (!net::online()) return;
+  bool due = checkAsked || (millis() > 90000 && (!lastCheck || millis() - lastCheck > 6UL * 3600UL * 1000UL));
+  if (due) {
+    checkAsked = false;
+    lastCheck = millis();
+    checkUpdates();
+    Serial.printf("[update] %s\n", updateText.c_str());
+    if (availBuild > 0 && s.autoUpdate && alarms.empty()) installAsked = true;
   }
   if (installAsked) {
     installAsked = false;
-    panel::Chrome c;
-    fillChrome(c);
-    panel::renderMessage(display::canvas(), "Updating firmware", "Downloading from Coeno. Don't unplug the panel.\nIt restarts by itself when done.", "", c);
-    display::show(false);
-    if (!ota_check_and_apply(url.c_str(), nullptr)) {
-      updateText = String("update failed: ") + ota_last_reason();
-      app::redraw(false);
-    }
+    if (availBuild <= 0) checkUpdates();
+    if (availBuild > 0) installUpdate();
+    else app::redraw(false);
   }
 }
 
@@ -416,6 +521,7 @@ void setup() {
   Serial.printf("\nPlanula-ePaper build %d (%s), name %s, mode %s\n", FW_BUILD, FW_VERSION,
                 settings::get().name.c_str(), settings::get().mode.c_str());
   display::begin(settings::get().panelDriver);
+  if (settings::get().mode == "direct" && settings::get().hydrosOn) hydros::reserve();
   net::begin();
   web::begin();
   coeno::onCommand(onCoenoCommand);
@@ -431,6 +537,7 @@ void loop() {
   apex::loop();
   hydros::loop();
   updates();
+  netUpload();
   ota_tick();
 
   int n = max(1, countPages());

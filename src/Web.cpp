@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <WebServer.h>
+#include <Update.h>
 #include <WiFi.h>
 
 #include "Apex.h"
@@ -12,6 +13,7 @@
 #include "Net.h"
 #include "Readings.h"
 #include "Settings.h"
+#include "ota.h"
 #include "web_ui.h"
 
 #ifndef FW_BUILD
@@ -278,6 +280,48 @@ void handleFactory() {
   app::rebootSoon();
 }
 
+// Firmware upload from the System page (a .bin from `pio run`). The new image
+// has to prove itself like a Coeno update (Wi-Fi + a drawn screen within 120 s)
+// or the panel goes back to the old one.
+bool upDenied = false;
+String upError;
+
+void handleUploadData() {
+  HTTPUpload &up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    const String &p = settings::get().adminPass;
+    upDenied = p.length() && !server.authenticate("admin", p.c_str());
+    upError = "";
+    if (upDenied) return;
+    Serial.printf("[update] upload %s\n", up.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) upError = Update.errorString();
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (upDenied || upError.length()) return;
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) upError = Update.errorString();
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (upDenied || upError.length()) return;
+    if (!Update.end(true)) upError = Update.errorString();
+    else Serial.printf("[update] %u bytes written\n", (unsigned)up.totalSize);
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    upError = "upload interrupted";
+  }
+}
+
+void handleUploadDone() {
+  if (upDenied) {
+    server.requestAuthentication(BASIC_AUTH, "Planula panel", "Password needed");
+    return;
+  }
+  if (upError.length() || Update.hasError()) {
+    if (Update.isRunning()) Update.abort();
+    return err(400, "update failed: " + (upError.length() ? upError : String(Update.errorString())));
+  }
+  ota_mark_pending();
+  ok("installed; restarting");
+  app::rebootSoon();
+}
+
 void handleNotFound() {
   if (captive()) return;
   server.send(404, "text/plain", "not found");
@@ -304,6 +348,7 @@ void begin() {
   server.on("/api/update/install", HTTP_POST, [] { if (allowed()) { app::installUpdateSoon(); ok("installing"); } });
   server.on("/api/reboot", HTTP_POST, [] { if (allowed()) { ok("restarting"); app::rebootSoon(); } });
   server.on("/api/factory-reset", HTTP_POST, handleFactory);
+  server.on("/api/update/upload", HTTP_POST, handleUploadDone, handleUploadData);
   server.on("/screen.bmp", HTTP_GET, handleScreen);
   // Phones probe these to detect a captive portal.
   server.on("/generate_204", HTTP_GET, handleRoot);

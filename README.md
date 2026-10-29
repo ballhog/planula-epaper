@@ -94,6 +94,15 @@ tools/host/render.sh         # renders sample screens to tools/host/out/*.png an
 ./publish.sh                 # build + stage the .bin in ../coeno/firmware/planula-epaper/ for OTA
 ```
 
+**Updates.** Every push to main is built by `.github/workflows/release.yml` and published as a GitHub release
+`build-<N>` (with `latest.json`). The panel checks Coeno first (`http://<coeno>:8000/firmware/planula-epaper/latest.json`).
+When Coeno doesn't answer (another network, Coeno down, nothing published there), it checks the GitHub release
+instead. It checks every 6 h, or on *Check now* (System page). *Install update* installs from whichever source
+had it. *Install new builds by itself* makes it install automatically, never during an alarm. You can also
+upload a `firmware.bin` from the System page, or use `pio run -e epaper-net -t upload` from the Mac (only when
+the running build was made with `CALYX_OTA_PASS` set; public release builds don't listen for it). Coeno and
+GitHub updates are SHA-256 checked, and any new build that doesn't get on Wi-Fi and draw within 120 s rolls back.
+
 `lib/panel` (model, text, layouts, page JSON, status rules) has no ESP32 code. The host renderer draws the exact same frames as the panel, which is where `docs/screens/` comes from.
 
 Layout:
