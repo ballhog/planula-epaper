@@ -2,10 +2,12 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <string.h>
 
 namespace readings {
 
-static std::vector<Reading> items;
+static Reading items[kMax];
+static int n = 0;
 static SemaphoreHandle_t mu = nullptr;
 static constexpr uint32_t kSlotMs = 30UL * 60UL * 1000UL;
 
@@ -25,24 +27,24 @@ static void pushSpark(Reading &r, float v) {
   }
 }
 
-void update(const String &key, const String &source, const String &device, const String &name, const String &kind,
+void update(const String &key, const char *source, const String &device, const String &name, const String &kind,
             const String &unit, float value) {
   Lock l;
   Reading *r = nullptr;
-  for (auto &it : items)
-    if (it.key == key) { r = &it; break; }
+  for (int i = 0; i < n; i++)
+    if (!strcmp(items[i].key, key.c_str())) { r = &items[i]; break; }
   if (!r) {
-    if (items.size() >= 80) return;
-    items.emplace_back();
-    r = &items.back();
-    r->key = key;
+    if (n >= kMax) return;
+    r = &items[n++];
+    memset(r, 0, sizeof *r);
+    PANEL_COPY(r->key, key.c_str());
     r->slotStartMs = millis();
   }
-  r->source = source;
-  r->device = device;
-  r->name = name;
-  r->kind = kind;
-  r->unit = unit;
+  PANEL_COPY(r->source, source);
+  PANEL_COPY(r->device, device.c_str());
+  PANEL_COPY(r->name, name.c_str());
+  PANEL_COPY(r->kind, kind.c_str());
+  PANEL_COPY(r->unit, unit.c_str());
   r->value = value;
   r->atMs = millis();
   if (isnan(value)) return;
@@ -67,21 +69,32 @@ void update(const String &key, const String &source, const String &device, const
 
 bool get(const String &key, Reading &out) {
   Lock l;
-  for (auto &it : items)
-    if (it.key == key) { out = it; return true; }
+  for (int i = 0; i < n; i++)
+    if (!strcmp(items[i].key, key.c_str())) {
+      out = items[i];
+      return true;
+    }
   return false;
 }
 
-std::vector<Reading> all() {
+int count() {
   Lock l;
-  return items;
+  return n;
 }
 
-void clearSource(const String &source) {
+bool at(int i, Reading &out) {
   Lock l;
-  for (size_t i = 0; i < items.size();)
-    if (items[i].source == source) items.erase(items.begin() + i);
-    else i++;
+  if (i < 0 || i >= n) return false;
+  out = items[i];
+  return true;
+}
+
+void clearSource(const char *source) {
+  Lock l;
+  int w = 0;
+  for (int i = 0; i < n; i++)
+    if (strcmp(items[i].source, source)) items[w++] = items[i];
+  n = w;
 }
 
 String guessKind(const String &type, const String &name) {

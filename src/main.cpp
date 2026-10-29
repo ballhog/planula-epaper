@@ -467,7 +467,8 @@ void updates() {
     // (build 10/11 only resumed if one was, so a check that landed between
     // sessions left Hydros paused for good: "Hydros offline").
     if (!(availBuild > 0 && s.autoUpdate)) hydros::pause(false);
-    Serial.printf("[update] %s\n", updateText.c_str());
+    Serial.printf("[update] %s (8-bit largest %u)\n", updateText.c_str(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     if (availBuild > 0 && s.autoUpdate && alarms.empty()) installAsked = true;
   }
   if (installAsked) {

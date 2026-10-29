@@ -504,6 +504,20 @@ void loop() {
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   String err = connectSteps(s.hydrosUser, s.hydrosPass, false, nullptr);
+  // Safety net: TLS needs two ~17 kB blocks plus working space. If the heap is
+  // too fragmented for that three times running, restart (the e-paper keeps
+  // the last picture, so it's ~10 s with no visible change).
+  static uint8_t tlsMemFails = 0;
+  if (err.indexOf("ESP_ERR_HTTP_CONNECT") >= 0 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 45000) {
+    if (++tlsMemFails >= 3) {
+      Serial.printf("[hydros] heap too fragmented for TLS (largest 8-bit block %u); restarting\n",
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+      delay(200);
+      ESP.restart();
+    }
+  } else if (!err.length()) {
+    tlsMemFails = 0;
+  }
   if (err.length()) {
     setState(err);
     nextTry = now + backoff;

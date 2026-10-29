@@ -206,7 +206,8 @@ void handleReadings() {
   if (!allowed()) return;
   JsonDocument d;
   JsonArray a = d.to<JsonArray>();
-  for (auto &r : readings::all()) {
+  readings::Reading r;
+  for (int i = 0; readings::at(i, r); i++) {
     JsonObject o = a.add<JsonObject>();
     o["key"] = r.key;
     o["source"] = r.source;

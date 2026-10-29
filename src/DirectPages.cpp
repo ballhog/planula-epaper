@@ -32,14 +32,14 @@ void build(int i, panel::Page &p) {
     g.dec = gc.dec;
     readings::Reading r;
     bool have = readings::get(gc.key, r);
-    String label = gc.label.length() ? gc.label : (have ? r.name : gc.key);
+    String label = gc.label.length() ? gc.label : (have ? String(r.name) : gc.key);
     PANEL_COPY(g.label, label.c_str());
     String unit = gc.unit;
-    bool toF = have && r.kind == "temp" && s.tempF;
-    if (!unit.length() && have) unit = toF ? "°F" : r.unit;
+    bool toF = have && !strcmp(r.kind, "temp") && s.tempF;
+    if (!unit.length() && have) unit = toF ? String("°F") : String(r.unit);
     PANEL_COPY(g.unit, unit.c_str());
     if (have) {
-      PANEL_COPY(g.src, r.source.c_str());
+      PANEL_COPY(g.src, r.source);
       g.has = !isnan(r.value);
       g.value = toF ? cToF(r.value) : r.value;
       g.age_s = (millis() - r.atMs) / 1000;
