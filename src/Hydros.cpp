@@ -331,6 +331,7 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
                   (unsigned)ESP.getFreeHeap());
     return;
   }
+  if (!lastMsg) Serial.printf("[hydros] first data %u s after start\n", (unsigned)(millis() / 1000));
   lastMsg = millis();
   static uint32_t lastLog = 0;
   if (!lastLog || millis() - lastLog > 300000UL) {

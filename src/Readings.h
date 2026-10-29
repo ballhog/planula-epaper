@@ -37,6 +37,10 @@ struct Reading {
 };
 
 float sparkAt(const Reading &r, int i);
+// Counts up whenever a key gets its first value. The loop redraws when it
+// changes, so a gauge waiting on "—" fills in at once instead of at the next
+// minute (Hydros data arrived ~20 s after boot but showed up to a minute later).
+uint32_t newKeys();
 // Readings the table had no room for since boot.
 uint32_t dropped();
 

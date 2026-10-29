@@ -20,6 +20,7 @@ struct Lock {
 };
 
 static uint32_t nDropped = 0;
+static volatile uint32_t nNew = 0;
 
 // float <-> IEEE 754 half (round to nearest, no NaN/denormal subtleties needed)
 static uint16_t toHalf(float f) {
@@ -47,6 +48,7 @@ static float fromHalf(uint16_t h) {
 
 float sparkAt(const Reading &r, int i) { return fromHalf(r.spark[i]); }
 uint32_t dropped() { return nDropped; }
+uint32_t newKeys() { return nNew; }
 
 static void pushSpark(Reading &r, float v) {
   if (r.nspark < panel::kSparkLen) r.spark[r.nspark++] = toHalf(v);
@@ -69,6 +71,7 @@ void update(const String &key, const char *source, const String &device, const S
     }
     r = &items[n++];
     memset(r, 0, sizeof *r);
+    nNew++;
     PANEL_COPY(r->key, key.c_str());
     r->slotStartMs = millis();
   }

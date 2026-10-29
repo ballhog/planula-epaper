@@ -27,6 +27,7 @@
 #include "Https.h"
 #include "Hydros.h"
 #include "Net.h"
+#include "Readings.h"
 #include "Render.h"
 #include "Settings.h"
 #include "Web.h"
@@ -621,6 +622,11 @@ void loop() {
   int minute = net::timeValid() ? (int)((time(nullptr) / 60) % 1440) : (int)(now / 60000);
   if (minute != lastMinute) {
     lastMinute = minute;
+    redrawAsked = true;
+  }
+  static uint32_t seenKeys = 0;
+  if (readings::newKeys() != seenKeys) {  // a gauge may have just got its first value
+    seenKeys = readings::newKeys();
     redrawAsked = true;
   }
   if (redrawAsked && now - lastDraw > 400) {
