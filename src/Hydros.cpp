@@ -13,6 +13,7 @@
 #include "Readings.h"
 #include "Settings.h"
 #include "SigV4.h"
+#include "WsTransport.h"
 #include "miniz.h"
 
 namespace hydros {
@@ -33,6 +34,8 @@ struct Thing {
 esp_mqtt_client_handle_t client = nullptr;
 volatile bool connected = false;
 volatile uint32_t lastMsg = 0;
+volatile uint32_t connectedAt = 0;
+bool onlyFirst = false;  // AWS dropped us after asking every controller: ask the first only
 uint32_t sessionStart = 0, nextTry = 0, backoff = 15000;
 String state = "off", userId;
 String lastLogged;
@@ -328,7 +331,10 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
       lastMsg = millis();
       Serial.printf("[hydros] AWS IoT connected (%s), asking %u controller(s) for status\n", wsHost.c_str(),
                     (unsigned)things.size());
-      for (auto &t : things) {
+      connectedAt = millis();
+      for (size_t i = 0; i < things.size(); i++) {
+        if (onlyFirst && i > 0) break;
+        auto &t = things[i];
         String rspT = userId + "/" + t.id + "/rsp/#";
         String reqT = userId + "/" + t.id + "/req/LISTEN/statusc";
         esp_mqtt_client_subscribe(e->client, rspT.c_str(), 1);
@@ -338,6 +344,11 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
     case MQTT_EVENT_DISCONNECTED:
       connected = false;
       Serial.println("[hydros] AWS IoT disconnected");
+      if (!onlyFirst && things.size() > 1 && connectedAt && millis() - connectedAt < 15000) {
+        onlyFirst = true;
+        Serial.printf("[hydros] dropped right after asking %u controllers; next session asks only %s\n",
+                      (unsigned)things.size(), things[0].name.c_str());
+      }
       break;
     case MQTT_EVENT_ERROR:
       if (e->error_handle)
@@ -383,11 +394,13 @@ void stopClient() {
 bool startClient() {
   clientIdStr = "planula-" + String((uint32_t)ESP.getEfuseMac(), HEX) + "-" + String(esp_random() % 10000);
   esp_mqtt_client_config_t cfg = {};
+  // Our own WebSocket transport: the framework's one can't send the ~1.9 kB
+  // signed upgrade request (fixed 1 kB buffer). See WsTransport.h.
+  esp_transport_handle_t tr = wst::create(wsPath.c_str(), "mqtt");
+  if (!tr) return false;
   cfg.broker.address.hostname = wsHost.c_str();
   cfg.broker.address.port = 443;
-  cfg.broker.address.transport = MQTT_TRANSPORT_OVER_WSS;
-  cfg.broker.address.path = wsPath.c_str();
-  cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+  cfg.network.transport = tr;
   cfg.credentials.client_id = clientIdStr.c_str();
   cfg.session.keepalive = 60;
   cfg.network.disable_auto_reconnect = true;  // a reconnect needs a freshly signed URL
@@ -396,9 +409,14 @@ bool startClient() {
   cfg.buffer.out_size = 1024;
   cfg.task.stack_size = 12288;
   client = esp_mqtt_client_init(&cfg);
-  if (!client) return false;
+  if (!client) {
+    esp_transport_destroy(tr);
+    return false;
+  }
   esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, onEvent, nullptr);
-  return esp_mqtt_client_start(client) == ESP_OK;
+  esp_err_t e = esp_mqtt_client_start(client);
+  if (e != ESP_OK) Serial.printf("[hydros] MQTT start: %s\n", esp_err_to_name(e));
+  return e == ESP_OK;
 }
 
 }  // namespace
@@ -444,8 +462,9 @@ void loop() {
     backoff = min<uint32_t>(backoff * 2, 10UL * 60UL * 1000UL);
     return;
   }
-  Serial.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s\n", (unsigned)things.size(),
-                things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str());
+  Serial.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s (request %u bytes)\n",
+                (unsigned)things.size(), things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str(),
+                (unsigned)wsPath.length());
   sessionStart = millis();
   if (!startClient()) {
     setState("MQTT start failed");
@@ -455,6 +474,7 @@ void loop() {
 }
 
 void restart() {
+  onlyFirst = false;
   stopClient();
   nextTry = 0;
   backoff = 15000;
