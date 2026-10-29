@@ -8,6 +8,9 @@
 
 #include <Adafruit_GFX.h>
 
+#include <functional>
+
+#include "BandCanvas.h"
 #include "Model.h"
 #include "PageJson.h"
 #include "Render.h"
@@ -27,6 +30,23 @@ static void savePbm(GFXcanvas1 &c, const char *name) {
   fwrite(c.getBuffer(), 1, kW / 8 * kH, f);  // GFXcanvas1: 1 = set = black, same as PBM
   fclose(f);
   printf("wrote %s\n", path);
+}
+
+// Draw a screen whole (as before) and in 120-row bands (as the panel does);
+// the two must agree bit for bit.
+static void shot(GFXcanvas1 &cv, const char *name, const std::function<void(Adafruit_GFX &)> &draw) {
+  cv.fillScreen(0);
+  draw(cv);
+  savePbm(cv, name);
+  BandCanvas band(kW, kH, 120);
+  int bad = 0;
+  for (int16_t y0 = 0; y0 < kH; y0 += band.bandRows()) {
+    band.setBand(y0);
+    draw(band);
+    if (memcmp(band.buffer(), cv.getBuffer() + (size_t)y0 * (kW / 8), band.bandBytes()) != 0) bad++;
+  }
+  if (bad) printf("FAIL banded drawing differs for %s (%d bands)\n", name, bad);
+  failures += bad;
 }
 
 static void spark(Gauge &g, float base, float amp, float drift, int n = 48) {
@@ -80,8 +100,7 @@ static void samples() {
   p.g[3].status = Status::Stale;
   p.n = 4;
   chromeFor(c, 0, 3);
-  render(cv, p, c);
-  savePbm(cv, "1-tank-2x2");
+  shot(cv, "1-tank-2x2", [&](Adafruit_GFX &d) { render(d, p, c); });
 
   // 2. Six gauges, salinity in alarm: banner + inverted tile.
   Page q;
@@ -108,11 +127,9 @@ static void samples() {
   chromeFor(c, 1, 3);
   PANEL_COPY(c.alarm, "SALINITY LOW 31.2 ppt");
   c.alarmCount = 1;
-  render(cv, q, c);
-  savePbm(cv, "2-chem-3x2-alarm");
+  shot(cv, "2-chem-3x2-alarm", [&](Adafruit_GFX &d) { render(d, q, c); });
   c.alarmAcked = true;
-  render(cv, q, c);
-  savePbm(cv, "3-chem-3x2-acked");
+  shot(cv, "3-chem-3x2-acked", [&](Adafruit_GFX &d) { render(d, q, c); });
   c.alarm[0] = 0;
   c.alarmAcked = false;
 
@@ -123,8 +140,7 @@ static void samples() {
   spark(s.g[0], 8.12f, 0.09f, 0.04f);
   s.n = 1;
   chromeFor(c, 2, 3);
-  render(cv, s, c);
-  savePbm(cv, "4-single");
+  shot(cv, "4-single", [&](Adafruit_GFX &d) { render(d, s, c); });
 
   // 5. List of eight.
   Page l;
@@ -136,8 +152,7 @@ static void samples() {
   l.g[8].status = Status::Missing;
   l.n = 9;
   chromeFor(c, 0, 1);
-  render(cv, l, c);
-  savePbm(cv, "5-list");
+  shot(cv, "5-list", [&](Adafruit_GFX &d) { render(d, l, c); });
 
   // 6. Setup screen.
   SetupInfo si;
@@ -148,8 +163,7 @@ static void samples() {
   Chrome sc;
   PANEL_COPY(sc.footerLeft, "planula-epaper-1 · setup mode");
   PANEL_COPY(sc.footerRight, "build 12");
-  renderSetup(cv, si, sc);
-  savePbm(cv, "6-setup");
+  shot(cv, "6-setup", [&](Adafruit_GFX &d) { renderSetup(d, si, sc); });
 
   // 7. Stale footer + waiting message.
   Chrome wc;
@@ -157,8 +171,7 @@ static void samples() {
   PANEL_COPY(wc.footerRight, "Wi-Fi -61 dBm");
   wc.footerAlert = true;
   PANEL_COPY(wc.clock, "8:41");
-  renderMessage(cv, "Waiting for Coeno", "Connected to Wi-Fi as 10.0.0.87.\nCoeno at 10.0.0.228 has not sent a page yet.\nSettings: http://planula-epaper-1.local", "10.0.0.87", wc);
-  savePbm(cv, "7-waiting");
+  shot(cv, "7-waiting", [&](Adafruit_GFX &d) { renderMessage(d, "Waiting for Coeno", "Connected to Wi-Fi as 10.0.0.87.\nCoeno at 10.0.0.228 has not sent a page yet.\nSettings: http://planula-epaper-1.local", "10.0.0.87", wc); });
 }
 
 static void tests() {

@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 
 #include "Readings.h"
 #include "Settings.h"
@@ -113,9 +114,14 @@ void loop() {
   lastPoll = millis();
   String err = poll(s.apexHost, s.apexUser, s.apexPass, true, &inputs);
   okNow = !err.length();
+  Serial.printf("[apex] poll %s: %s (8-bit free %u, largest %u)\n", s.apexHost.c_str(),
+                okNow ? (String(inputs) + " inputs").c_str() : err.c_str(),
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   if (okNow) {
     lastOk = millis();
     state = "ok · " + String(inputs) + " inputs";
+    if (readings::dropped()) state += " · some not kept (panel full)";
   } else {
     state = err;
   }

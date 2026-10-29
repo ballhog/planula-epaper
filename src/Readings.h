@@ -13,24 +13,32 @@
 
 namespace readings {
 
-constexpr int kMax = 48;
+// 64 inputs: an Apex with a couple of EnergyBars reports 30-50 (amps and watts
+// per outlet) next to the 16 a Hydros sends. Build 14 had 48 and filled up.
+constexpr int kMax = 64;
 
 struct Reading {
-  char key[64];     // stable id used by GaugeCfg.key
+  char key[48];     // stable id used by GaugeCfg.key
   char source[8];   // "Apex" / "Hydros"
-  char device[28];  // controller name
-  char name[32];    // input name as the controller calls it
+  char device[24];  // controller name
+  char name[28];    // input name as the controller calls it
   char kind[8];     // ph | temp | orp | cond | alk | calc | mag | level | switch | other
   char unit[8];     // best guess for display ("°C", "mV", "ppt", "dKH", "ppm")
   float value;
   uint32_t atMs;    // millis() of the last update
-  // 24 h trend: one point per 30 min (the mean of what arrived in that slot).
-  float spark[panel::kSparkLen];
+  // 24 h trend: one point per 30 min (the mean of what arrived in that slot),
+  // stored as IEEE half floats (3 significant digits: plenty for a sparkline,
+  // and half the RAM). Read with sparkAt().
+  uint16_t spark[panel::kSparkLen];
   uint8_t nspark;
   float slotSum;
   uint16_t slotN;
   uint32_t slotStartMs;
 };
+
+float sparkAt(const Reading &r, int i);
+// Readings the table had no room for since boot.
+uint32_t dropped();
 
 void update(const String &key, const char *source, const String &device, const String &name, const String &kind,
             const String &unit, float value);

@@ -19,11 +19,40 @@ struct Lock {
   ~Lock() { xSemaphoreGive(mu); }
 };
 
+static uint32_t nDropped = 0;
+
+// float <-> IEEE 754 half (round to nearest, no NaN/denormal subtleties needed)
+static uint16_t toHalf(float f) {
+  uint32_t x;
+  memcpy(&x, &f, 4);
+  uint16_t sign = (x >> 16) & 0x8000;
+  int32_t e = (int32_t)((x >> 23) & 0xFF) - 127 + 15;
+  uint32_t m = x & 0x7FFFFF;
+  if (e <= 0) return sign;                // too small: 0
+  if (e >= 31) return sign | 0x7BFF;      // too big: clamp to 65504
+  uint16_t h = sign | (uint16_t)(e << 10) | (uint16_t)(m >> 13);
+  if (m & 0x1000) h++;                     // round
+  return h;
+}
+
+static float fromHalf(uint16_t h) {
+  uint32_t sign = (uint32_t)(h & 0x8000) << 16;
+  uint32_t e = (h >> 10) & 0x1F, m = h & 0x3FF;
+  if (!e) return sign ? -0.0f : 0.0f;
+  uint32_t x = sign | ((e - 15 + 127) << 23) | (m << 13);
+  float f;
+  memcpy(&f, &x, 4);
+  return f;
+}
+
+float sparkAt(const Reading &r, int i) { return fromHalf(r.spark[i]); }
+uint32_t dropped() { return nDropped; }
+
 static void pushSpark(Reading &r, float v) {
-  if (r.nspark < panel::kSparkLen) r.spark[r.nspark++] = v;
+  if (r.nspark < panel::kSparkLen) r.spark[r.nspark++] = toHalf(v);
   else {
-    memmove(r.spark, r.spark + 1, sizeof(float) * (panel::kSparkLen - 1));
-    r.spark[panel::kSparkLen - 1] = v;
+    memmove(r.spark, r.spark + 1, sizeof(r.spark[0]) * (panel::kSparkLen - 1));
+    r.spark[panel::kSparkLen - 1] = toHalf(v);
   }
 }
 
@@ -34,7 +63,10 @@ void update(const String &key, const char *source, const String &device, const S
   for (int i = 0; i < n; i++)
     if (!strcmp(items[i].key, key.c_str())) { r = &items[i]; break; }
   if (!r) {
-    if (n >= kMax) return;
+    if (n >= kMax) {
+      if (nDropped++ % 50 == 0) Serial.printf("[readings] table full (%d), dropped %s\n", kMax, key.c_str());
+      return;
+    }
     r = &items[n++];
     memset(r, 0, sizeof *r);
     PANEL_COPY(r->key, key.c_str());
@@ -64,7 +96,7 @@ void update(const String &key, const char *source, const String &device, const S
   }
   r->slotSum += value;
   r->slotN++;
-  r->spark[r->nspark - 1] = r->slotSum / r->slotN;
+  r->spark[r->nspark - 1] = toHalf(r->slotSum / r->slotN);
 }
 
 bool get(const String &key, Reading &out) {

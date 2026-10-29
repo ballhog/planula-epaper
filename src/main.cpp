@@ -15,6 +15,8 @@
 #include <WiFi.h>
 #include <time.h>
 
+#include <memory>
+#include <new>
 #include <vector>
 
 #include "Apex.h"
@@ -178,7 +180,12 @@ void fillChrome(panel::Chrome &c) {
   c.footerAlert = alert;
 }
 
-void drawInfo(panel::Chrome &c) {
+// A message screen as a scene that owns its text.
+display::Scene message(const String &title, const String &body, const String &big, const panel::Chrome &c) {
+  return [title, body, big, c](Adafruit_GFX &d) { panel::renderMessage(d, title.c_str(), body.c_str(), big.c_str(), c); };
+}
+
+display::Scene drawInfo(panel::Chrome &c) {
   const Settings &s = settings::get();
   String body = "Settings:  http://" + s.name + ".local  or  http://" + net::ip() + "\n";
   body += "Mode: " + s.mode + "   ·   " + net::statusText() + "\n";
@@ -186,7 +193,7 @@ void drawInfo(panel::Chrome &c) {
   if (s.apexOn) body += "Apex: " + apex::status() + "\n";
   if (s.hydrosOn) body += "Hydros: " + hydros::status() + "\n";
   body += "Build " + String(FW_BUILD) + " (" FW_VERSION ")";
-  panel::renderMessage(display::canvas(), s.name.c_str(), body.c_str(), net::ip().c_str(), c);
+  return message(s.name, body, net::ip(), c);
 }
 
 // What kind of screen is up ("setup", "info", "page:2", ...). Partial refreshes
@@ -200,35 +207,39 @@ void draw() {
   String screen;
   panel::Chrome c;
   fillChrome(c);
-  GFXcanvas1 &cv = display::canvas();
   const Settings &s = settings::get();
+  display::Scene scene;
 
   if (net::state() == net::State::SetupAp && !net::online()) {
-    panel::SetupInfo si;
-    String ap = net::apName(), url = "http://192.168.4.1", why = net::setupReason();
-    si.apName = ap.c_str();
-    si.apPass = s.apPass.c_str();
-    si.url = url.c_str();
-    si.reason = why.c_str();
+    String ap = net::apName(), pass = s.apPass, url = "http://192.168.4.1", why = net::setupReason();
     String left = s.name + " · setup mode";
     PANEL_COPY(c.footerLeft, left.c_str());
     c.footerAlert = false;
     snprintf(c.footerRight, sizeof c.footerRight, "build %d", (int)FW_BUILD);
-    panel::renderSetup(cv, si, c);
+    scene = [ap, pass, url, why, c](Adafruit_GFX &d) {
+      panel::SetupInfo si;
+      si.apName = ap.c_str();
+      si.apPass = pass.c_str();
+      si.url = url.c_str();
+      si.reason = why.c_str();
+      panel::renderSetup(d, si, c);
+    };
     screen = "setup";
   } else if (millis() < infoUntil) {
-    drawInfo(c);
+    scene = drawInfo(c);
     screen = "info";
   } else if (!net::online()) {
-    panel::renderMessage(cv, "Joining Wi-Fi", ("Looking for " + (s.wifi.empty() ? String("a network") : s.wifi[0].ssid) +
-                                                 " …\nHold the BOOT button 10 s to open the setup network.").c_str(),
-                         "", c);
+    scene = message("Joining Wi-Fi",
+                    "Looking for " + (s.wifi.empty() ? String("a network") : s.wifi[0].ssid) +
+                        " …\nHold the BOOT button 10 s to open the setup network.",
+                    "", c);
     screen = "joining";
   } else {
-    panel::Page p;
-    if (!fetchPage(curPage, p)) {
+    // The page lives on the heap only while it's the current scene (~3 kB).
+    std::shared_ptr<panel::Page> p(new (std::nothrow) panel::Page());
+    if (!p || !fetchPage(curPage, *p)) {
       String body;
-      const char *title;
+      String title;
       if (coenoMode()) {
         title = "Waiting for Coeno";
         body = "Connected to Wi-Fi as " + net::ip() + ".\nCoeno: " + coeno::status() +
@@ -237,11 +248,11 @@ void draw() {
         title = "No gauges yet";
         body = "Pick what to show at http://" + s.name + ".local\n(or http://" + net::ip() + ")";
       }
-      panel::renderMessage(cv, title, body.c_str(), net::ip().c_str(), c);
+      scene = message(title, body, net::ip(), c);
       screen = title;
     } else {
-      panel::render(cv, p, c);
-      screen = "page:" + String(curPage) + ":" + String(p.n) + ":" + String(nPages);
+      scene = [p, c](Adafruit_GFX &d) { panel::render(d, *p, c); };
+      screen = "page:" + String(curPage) + ":" + String(p->n) + ":" + String(nPages);
     }
   }
   // A new build has proven itself once it is on Wi-Fi and drawing.
@@ -252,7 +263,7 @@ void draw() {
   bool full = fullAsked || screen != lastScreen;
   fullAsked = false;
   lastScreen = screen;
-  display::show(full);
+  display::show(scene, full);
   if (identifyAsked) {
     identifyAsked = false;
     display::flash(3);
@@ -314,8 +325,7 @@ void button() {
       longDone = true;
       settings::factoryReset();
       panel::Chrome c;
-      panel::renderMessage(display::canvas(), "Settings erased", "Restarting into setup mode…", "", c);
-      display::show(true);
+      display::show(message("Settings erased", "Restarting into setup mode…", "", c), true);
       delay(500);
       ESP.restart();
     }
@@ -357,8 +367,7 @@ void netUpload() {
     ArduinoOTA.onStart([] {
       Serial.println("[update] network upload started");
       panel::Chrome c;
-      panel::renderMessage(display::canvas(), "Updating firmware", "Receiving from the Mac. Don't unplug the panel.", "", c);
-      display::show(false);
+      display::show(message("Updating firmware", "Receiving from the Mac. Don't unplug the panel.", "", c), false);
     });
     ArduinoOTA.onEnd([] {
       Serial.println("[update] network upload done");
@@ -382,8 +391,7 @@ void showUpdating(const char *from) {
   panel::Chrome c;
   fillChrome(c);
   String body = String("Downloading from ") + from + ". Don't unplug the panel.\nIt restarts by itself when done.";
-  panel::renderMessage(display::canvas(), "Updating firmware", body.c_str(), "", c);
-  display::show(false);
+  display::show(message("Updating firmware", body, "", c), false);
 }
 
 void checkUpdates() {

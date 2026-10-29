@@ -44,7 +44,10 @@ void build(int i, panel::Page &p) {
       g.value = toF ? cToF(r.value) : r.value;
       g.age_s = (millis() - r.atMs) / 1000;
       g.nspark = r.nspark;
-      for (int k = 0; k < r.nspark; k++) g.spark[k] = toF ? cToF(r.spark[k]) : r.spark[k];
+      for (int k = 0; k < r.nspark; k++) {
+        float v = readings::sparkAt(r, k);
+        g.spark[k] = toF ? cToF(v) : v;
+      }
     }
     panel::Limits L{gc.warnLo, gc.warnHi, gc.alarmLo, gc.alarmHi};
     panel::evaluate(g, L, s.stale_s);

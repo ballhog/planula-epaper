@@ -5,6 +5,7 @@
 #include <epd/GxEPD2_750_T7.h>
 #include <gdey/GxEPD2_750_GDEY075T7.h>
 
+#include "BandCanvas.h"
 #include "Render.h"
 #include "Settings.h"
 
@@ -12,33 +13,55 @@ namespace display {
 
 namespace {
 
-GFXcanvas1 *cv = nullptr;
+constexpr int16_t kBand = 120;  // 4 bands of 12 kB
+panel::BandCanvas *cv = nullptr;
 GxEPD2_EPD *epd = nullptr;
+Scene last;
+int16_t bandY = -1;  // band currently in cv, -1 = none / stale
 uint32_t lastHash = 0, partials = 0, nRefresh = 0, nFull = 0, lastFullMs = 0;
 bool first = true, fullAsked = false;
 
-uint32_t hashFrame() {
-  // FNV-1a over the frame
-  const uint8_t *b = cv->getBuffer();
+void drawBand(const Scene &scene, int16_t y0) {
+  cv->setBand(y0);
+  if (scene) scene(*cv);
+  bandY = y0;
+}
+
+uint32_t hashScene(const Scene &scene) {
+  // FNV-1a over the frame, band by band (same value a whole-frame hash gives)
   uint32_t h = 2166136261u;
-  for (size_t i = 0; i < (size_t)panel::kW / 8 * panel::kH; i++) h = (h ^ b[i]) * 16777619u;
+  for (int16_t y0 = 0; y0 < panel::kH; y0 += kBand) {
+    drawBand(scene, y0);
+    const uint8_t *b = cv->buffer();
+    for (size_t i = 0; i < cv->bandBytes(); i++) h = (h ^ b[i]) * 16777619u;
+  }
   return h;
 }
 
-void push(bool full) {
-  // Canvas: 1 = ink. GxEPD2 bitmaps: 1 = white, hence invert = true.
-  const uint8_t *buf = cv->getBuffer();
+enum class Write { Full, Partial, Again };
+
+void writeAll(Write how, bool inverted) {
+  // Band: 1 = ink. GxEPD2 bitmaps: 1 = white, hence invert = true.
+  for (int16_t y0 = 0; y0 < panel::kH; y0 += kBand) {
+    drawBand(last, y0);
+    const uint8_t *buf = cv->buffer();
+    int16_t h = panel::kH - y0 < kBand ? panel::kH - y0 : kBand;
+    bool inv = !inverted;
+    if (how == Write::Full) epd->writeImageForFullRefresh(buf, 0, y0, panel::kW, h, inv, false, false);
+    else if (how == Write::Partial) epd->writeImage(buf, 0, y0, panel::kW, h, inv, false, false);
+    else epd->writeImageAgain(buf, 0, y0, panel::kW, h, inv, false, false);
+  }
+}
+
+void push(bool full, bool inverted = false) {
+  writeAll(full ? Write::Full : Write::Partial, inverted);
+  epd->refresh(!full);
+  writeAll(Write::Again, inverted);
   if (full) {
-    epd->writeImageForFullRefresh(buf, 0, 0, panel::kW, panel::kH, true, false, false);
-    epd->refresh(false);
-    epd->writeImageAgain(buf, 0, 0, panel::kW, panel::kH, true, false, false);
     nFull++;
     lastFullMs = millis();
     partials = 0;
   } else {
-    epd->writeImage(buf, 0, 0, panel::kW, panel::kH, true, false, false);
-    epd->refresh(true);
-    epd->writeImageAgain(buf, 0, 0, panel::kW, panel::kH, true, false, false);
     partials++;
   }
   epd->powerOff();  // panel voltages off between updates: no fading, less wear
@@ -48,7 +71,7 @@ void push(bool full) {
 }  // namespace
 
 void begin(const String &driver) {
-  cv = new GFXcanvas1(panel::kW, panel::kH);
+  cv = new panel::BandCanvas(panel::kW, panel::kH, kBand);
   // CS, DC and RST are plain GPIOs that GxEPD2 drives itself. Don't hand CS to
   // the SPI peripheral (SPI.begin's ss argument): the core then refuses
   // digitalWrite on it and the panel is never selected (build 1 bug).
@@ -67,10 +90,9 @@ void begin(const String &driver) {
   epd->init(115200, true, 2, false);
 }
 
-GFXcanvas1 &canvas() { return *cv; }
-
-bool show(bool forceFull) {
-  uint32_t h = hashFrame();
+bool show(const Scene &scene, bool forceFull) {
+  last = scene;
+  uint32_t h = hashScene(last);
   bool changed = h != lastHash || first;
   const Settings &s = settings::get();
   bool full = forceFull || first || fullAsked || partials >= s.fullEvery || millis() - lastFullMs > 3600000UL;
@@ -88,13 +110,7 @@ bool show(bool forceFull) {
 }
 
 void flash(int times) {
-  uint8_t *b = cv->getBuffer();
-  size_t n = (size_t)panel::kW / 8 * panel::kH;
-  for (int i = 0; i < times * 2; i++) {
-    for (size_t k = 0; k < n; k++) b[k] ^= 0xFF;
-    push(false);
-  }
-  lastHash = hashFrame();
+  for (int i = 0; i < times * 2; i++) push(false, i % 2 == 0);
 }
 
 void requestFull() { fullAsked = true; }
@@ -121,6 +137,10 @@ void bmpHeader(uint8_t *o) {
   o[58] = 0x1C; o[59] = 0x1C; o[60] = 0x1C;
 }
 
-const uint8_t *row(int y) { return cv->getBuffer() + (size_t)y * (panel::kW / 8); }
+const uint8_t *row(int y) {
+  int16_t y0 = (int16_t)(y / kBand * kBand);
+  if (bandY != y0) drawBand(last, y0);
+  return cv->buffer() + (size_t)(y - y0) * (panel::kW / 8);
+}
 
 }  // namespace display
