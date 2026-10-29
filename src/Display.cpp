@@ -49,8 +49,18 @@ void push(bool full) {
 
 void begin(const String &driver) {
   cv = new GFXcanvas1(panel::kW, panel::kH);
+  // CS, DC and RST are plain GPIOs that GxEPD2 drives itself. Don't hand CS to
+  // the SPI peripheral (SPI.begin's ss argument): the core then refuses
+  // digitalWrite on it and the panel is never selected (build 1 bug).
+  pinMode(PIN_CS, OUTPUT);
+  digitalWrite(PIN_CS, HIGH);
+  pinMode(PIN_DC, OUTPUT);
+  digitalWrite(PIN_DC, HIGH);
+  pinMode(PIN_RST, OUTPUT);
+  digitalWrite(PIN_RST, HIGH);
+  pinMode(PIN_BUSY, INPUT);
   SPI.end();
-  SPI.begin(PIN_SCK, -1, PIN_MOSI, PIN_CS);
+  SPI.begin(PIN_SCK, -1, PIN_MOSI, -1);
   if (driver == "gdey") epd = new GxEPD2_750_GDEY075T7(PIN_CS, PIN_DC, PIN_RST, PIN_BUSY);
   else epd = new GxEPD2_750_T7(PIN_CS, PIN_DC, PIN_RST, PIN_BUSY);
   // Waveshare boards want a 2 ms reset pulse.
