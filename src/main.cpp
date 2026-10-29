@@ -461,9 +461,12 @@ void updates() {
     lastCheck = millis();
     // One TLS session at a time: the GitHub check needs ~40 kB the Hydros
     // stream is holding. Pause it, check, let it reconnect.
-    bool paused = hydros::pause(true);
+    hydros::pause(true);
     checkUpdates();
-    if (paused && !(availBuild > 0 && s.autoUpdate)) hydros::pause(false);
+    // Always resume, whether or not a session was open when the check began
+    // (build 10/11 only resumed if one was, so a check that landed between
+    // sessions left Hydros paused for good: "Hydros offline").
+    if (!(availBuild > 0 && s.autoUpdate)) hydros::pause(false);
     Serial.printf("[update] %s\n", updateText.c_str());
     if (availBuild > 0 && s.autoUpdate && alarms.empty()) installAsked = true;
   }

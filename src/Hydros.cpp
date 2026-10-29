@@ -464,7 +464,10 @@ bool startClient() {
 
 void loop() {
   const Settings &s = settings::get();
-  if (paused) return;
+  if (paused) {
+    setState("paused for an update check");
+    return;
+  }
   if (!s.hydrosOn || s.mode != "direct") {
     if (client) stopClient();
     setState(s.hydrosOn ? "on (used in direct mode)" : "off");
