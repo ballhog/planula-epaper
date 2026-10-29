@@ -477,9 +477,9 @@ bool startClient() {
   cfg.session.keepalive = 60;
   cfg.network.disable_auto_reconnect = true;  // a reconnect needs a freshly signed URL
   cfg.network.timeout_ms = 20000;
-  cfg.buffer.size = 4096;
-  cfg.buffer.out_size = 1024;
-  cfg.task.stack_size = 12288;
+  cfg.buffer.size = 2048;
+  cfg.buffer.out_size = 512;
+  cfg.task.stack_size = 8192;
   client = esp_mqtt_client_init(&cfg);
   if (!client) {
     esp_transport_destroy(tr);

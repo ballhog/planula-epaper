@@ -6,6 +6,7 @@
 #include <freertos/semphr.h>
 #include <mqtt_client.h>
 
+#include <new>
 #include <vector>
 
 #include "PageJson.h"
@@ -24,7 +25,9 @@ volatile bool isConnected = false;
 String prefix, uri, lwt, clientId, activeKey;
 SemaphoreHandle_t mu = nullptr;
 
-panel::Page pages[panel::kMaxPages];
+// Allocated on first start (Coeno mode only): ~23 kB the panel needs in direct
+// mode for TLS.
+panel::Page *pages = nullptr;
 uint32_t pageAt[panel::kMaxPages] = {0};
 bool pageValid[panel::kMaxPages] = {false};
 int cfgPages = -1;
@@ -37,7 +40,7 @@ void (*cmdCb)(const String &, const String &) = nullptr;
 char *rx = nullptr;
 size_t rxCap = 0;
 String rxTopic;
-panel::Page staging;  // parse target (only the MQTT task touches it)
+panel::Page *staging = nullptr;  // parse target (only the MQTT task touches it)
 
 struct Lock {
   Lock() {
@@ -78,9 +81,9 @@ void handle(const String &topic, const char *data, size_t len) {
       pageValid[n] = false;
       return;
     }
-    if (panel::parsePage(data, len, staging)[0]) return;
+    if (!pages || !staging || panel::parsePage(data, len, *staging)[0]) return;
     Lock l;
-    pages[n] = staging;
+    pages[n] = *staging;
     pageAt[n] = millis();
     pageValid[n] = true;
     lastPage = millis();
@@ -151,6 +154,18 @@ void stop() {
 
 void start() {
   const Settings &s = settings::get();
+  if (!pages) {
+    pages = new (std::nothrow) panel::Page[panel::kMaxPages];
+    staging = new (std::nothrow) panel::Page();
+    if (!pages || !staging) {
+      Serial.println("[coeno] no memory for pages");
+      delete[] pages;
+      delete staging;
+      pages = nullptr;
+      staging = nullptr;
+      return;
+    }
+  }
   prefix = "panel_node/" + s.name + "/";
   uri = "mqtt://" + s.coenoHost + ":" + String(s.coenoPort);
   lwt = hello(false);
@@ -184,7 +199,10 @@ void loop() {
   const Settings &s = settings::get();
   // The link stays up in both modes when a host is set: Coeno also gets the
   // panel's state and can send commands / updates in direct mode.
-  bool want = WiFi.isConnected() && s.coenoHost.length() > 0;
+  // Pages over MQTT are only used in Coeno mode. In direct mode the client
+  // (task + buffers) would only cost the RAM TLS needs; updates from Coeno are
+  // plain HTTP and keep working without it.
+  bool want = WiFi.isConnected() && s.coenoHost.length() > 0 && s.mode == "coeno";
   String key = s.name + "@mqtt://" + s.coenoHost + ":" + String(s.coenoPort);
   if (!want || (client && key != activeKey)) stop();
   if (want && !client) start();
@@ -204,6 +222,7 @@ bool connected() { return isConnected; }
 String status() {
   const Settings &s = settings::get();
   if (!s.coenoHost.length()) return "no Coeno host set";
+  if (s.mode != "coeno") return "not used in direct mode (updates still checked at " + s.coenoHost + ")";
   if (!isConnected) return "connecting to " + s.coenoHost;
   if (!lastPage) return "connected · no page yet";
   return "connected · last page " + String((millis() - lastPage) / 1000) + " s ago";
@@ -221,7 +240,7 @@ int pageCount() {
 bool getPage(int i, panel::Page &out, uint32_t &receivedMs) {
   if (i < 0 || i >= panel::kMaxPages) return false;
   Lock l;
-  if (!pageValid[i]) return false;
+  if (!pages || !pageValid[i]) return false;
   out = pages[i];
   receivedMs = pageAt[i];
   return true;

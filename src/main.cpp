@@ -522,6 +522,8 @@ void setup() {
                 settings::get().name.c_str(), settings::get().mode.c_str());
   display::begin(settings::get().panelDriver);
   if (settings::get().mode == "direct" && settings::get().hydrosOn) hydros::reserve();
+  Serial.printf("[mem] after start: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
   net::begin();
   web::begin();
   coeno::onCommand(onCoenoCommand);
