@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Planula panel</title>
+<style>
+:root{--bg:#f4f3ef;--card:#fff;--ink:#1d1d1b;--muted:#6b6a64;--line:#dddbd3;--accent:#0f6b6b;--ok:#2f7d32;--warn:#b26a00;--bad:#b3261e;--r:12px}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1f1f1d;--ink:#ecebe6;--muted:#a09f98;--line:#33322f;--accent:#5fb3b3}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:2}
+header h1{font-size:18px;margin:0}header .sub{color:var(--muted);font-size:13px}
+nav{display:flex;gap:4px;overflow-x:auto;padding:8px 12px;background:var(--card);border-bottom:1px solid var(--line)}
+nav button{border:0;background:none;padding:8px 12px;border-radius:8px;color:var(--muted);font:inherit;cursor:pointer;white-space:nowrap}
+nav button.on{background:var(--bg);color:var(--ink);font-weight:600}
+main{max-width:900px;margin:0 auto;padding:16px}
+section{display:none}section.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 10px}.card p.hint{color:var(--muted);margin:4px 0 12px;font-size:13px}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+input[type=checkbox],input[type=radio]{width:auto;margin-right:6px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.btn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:8px;cursor:pointer}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}.btn.bad{color:var(--bad)}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted)}
+.pill.ok{color:var(--ok);border-color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}
+.screen{width:100%;max-width:800px;aspect-ratio:5/3;border-radius:8px;border:1px solid var(--line);background:#ececec;image-rendering:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:500}
+.g{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+.g .top{display:flex;gap:8px;align-items:center}.g .top select{flex:1}
+.mini{width:auto;padding:4px 8px;font-size:13px}
+.result{margin-top:8px;font-size:13px}.result.ok{color:var(--ok)}.result.bad{color:var(--bad)}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;font-size:14px}.kv div:nth-child(odd){color:var(--muted)}
+.alarm{background:var(--bad);color:#fff;border-radius:10px;padding:10px 14px;margin-bottom:14px;display:none;align-items:center;gap:10px}
+.alarm.on{display:flex}.alarm .btn{margin-left:auto}
+.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<header><div><h1 id="title">Planula panel</h1><div class="sub" id="sub">loading…</div></div></header>
+<nav id="nav">
+ <button data-t="panel" class="on">Panel</button><button data-t="wifi">Wi-Fi</button><button data-t="data">Data source</button>
+ <button data-t="gauges">Gauges</button><button data-t="display">Display</button><button data-t="system">System</button>
+</nav>
+<main>
+<div class="alarm" id="alarm"><b>▲</b><span id="alarmText"></span><button class="btn" onclick="post('/api/ack').then(refresh)">Acknowledge</button></div>
+
+<section id="t-panel" class="on">
+ <div class="card"><h2>On the screen now</h2>
+  <img class="screen" id="screen" alt="panel screen">
+  <div class="btns"><button class="btn" onclick="post('/api/page',{n:Math.max(0,S.page-1)}).then(later)">◀ Page</button>
+  <button class="btn" onclick="post('/api/page',{next:true}).then(later)">Page ▶</button>
+  <button class="btn" onclick="post('/api/refresh',{full:true}).then(later)">Full refresh</button>
+  <button class="btn" onclick="post('/api/identify')">Flash screen</button></div>
+ </div>
+ <div class="card"><h2>Status</h2><div class="kv" id="kv"></div></div>
+</section>
+
+<section id="t-wifi">
+ <div class="card"><h2>Saved networks</h2>
+  <p class="hint">The panel joins the strongest one it can hear. If none works for a minute it opens its own setup network again (shown on the screen).</p>
+  <table><tbody id="wifiList"></tbody></table>
+ </div>
+ <div class="card"><h2>Add a network</h2>
+  <div class="row"><div><label>Network</label><select id="scanSel" onchange="$('newSsid').value=this.value"><option value="">— scan first —</option></select></div>
+  <div><label>&nbsp;</label><button class="btn" onclick="scan()">Scan</button></div></div>
+  <div class="row"><div><label>Name (SSID)</label><input id="newSsid" autocomplete="off"></div>
+  <div><label>Password</label><input id="newPass" type="password" autocomplete="new-password"></div></div>
+  <div class="btns"><button class="btn pri" onclick="addWifi()">Add and connect</button></div>
+ </div>
+</section>
+
+<section id="t-data">
+ <div class="card"><h2>Where the panel gets its data</h2>
+  <label><input type="radio" name="mode" value="coeno"> <b>Coeno</b> — Coeno builds the pages, decides what's normal and sends them over MQTT.</label>
+  <label><input type="radio" name="mode" value="direct"> <b>Direct</b> — the panel reads the Apex and/or Hydros itself (no Coeno needed). Pick gauges on the Gauges tab.</label>
+ </div>
+ <div class="card"><h2>Coeno</h2>
+  <p class="hint">Used for pages in Coeno mode, and for firmware updates and remote control in both modes.</p>
+  <div class="row"><div><label>Coeno address</label><input id="coenoHost" placeholder="10.0.0.228"></div>
+  <div><label>MQTT port</label><input id="coenoPort" type="number"></div></div>
+  <label><input type="checkbox" id="coenoUpdates"> Check Coeno for firmware updates</label>
+ </div>
+ <div class="card"><h2>Neptune Apex</h2>
+  <p class="hint">Local login (the one for the Apex's own web page). The panel reads <code>/rest/status</code> on your network.</p>
+  <label><input type="checkbox" id="apexOn"> Use the Apex in direct mode</label>
+  <div class="row"><div><label>Apex address</label><input id="apexHost" placeholder="10.0.0.50 or apex.local"></div>
+  <div><label>User</label><input id="apexUser" autocomplete="off"></div>
+  <div><label>Password</label><input id="apexPass" type="password" autocomplete="new-password"></div></div>
+  <div class="row"><div><label>Read every (seconds)</label><input id="apexPoll" type="number" min="10"></div>
+  <div><label>Apex temperatures are in</label><select id="apexUnit"><option value="auto">work it out</option><option value="F">°F</option><option value="C">°C</option></select></div></div>
+  <div class="btns"><button class="btn" onclick="testApex()">Test login</button></div><div class="result" id="apexRes"></div>
+ </div>
+ <div class="card"><h2>Hydros</h2>
+  <p class="hint">Your Hydros app login. The panel signs in to the CoralVue cloud (the same way Coeno does) and streams live values. The password stays on the panel.</p>
+  <label><input type="checkbox" id="hydrosOn"> Use the Hydros in direct mode</label>
+  <div class="row"><div><label>E-mail</label><input id="hydrosUser" type="email" autocomplete="off"></div>
+  <div><label>Password</label><input id="hydrosPass" type="password" autocomplete="new-password"></div></div>
+  <div class="btns"><button class="btn" onclick="testHydros()">Test login</button></div><div class="result" id="hydrosRes"></div>
+ </div>
+ <div class="btns"><button class="btn pri" onclick="saveData()">Save data settings</button></div>
+</section>
+
+<section id="t-gauges">
+ <div class="card" id="coenoNote"><h2>Pages come from Coeno</h2><p class="hint">In Coeno mode the gauges and pages are picked in Coeno. Switch to direct mode on the Data source tab to pick them here.</p></div>
+ <div class="card"><h2>Pages</h2><p class="hint">Layout <i>auto</i> picks a grid from the number of gauges: 1 big, 2–3 side by side, 4 as 2×2, 5–6 as 3×2, more as a list.</p>
+  <div id="pages"></div><div class="btns"><button class="btn" onclick="addPage()">Add page</button></div></div>
+ <div class="card"><h2>Gauges</h2>
+  <p class="hint">Readings appear here once the Apex/Hydros has been read. Normal range draws the dashed band and turns the tile to <i>warning</i> outside it; alarm limits turn it black, flash the screen and show the banner until you press the button.</p>
+  <div id="gauges"></div>
+  <div class="btns"><button class="btn" onclick="addGauge()">Add gauge</button><button class="btn" onclick="loadReadings()">Reload readings</button></div>
+ </div>
+ <div class="btns"><button class="btn pri" onclick="saveGauges()">Save pages and gauges</button></div>
+</section>
+
+<section id="t-display">
+ <div class="card"><h2>Display</h2>
+  <div class="row"><div><label>Time zone</label><select id="tz">
+   <option value="EST5EDT,M3.2.0,M11.1.0">Eastern (Detroit)</option><option value="CST6CDT,M3.2.0,M11.1.0">Central</option>
+   <option value="MST7MDT,M3.2.0,M11.1.0">Mountain</option><option value="MST7">Arizona</option><option value="PST8PDT,M3.2.0,M11.1.0">Pacific</option>
+   <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe</option><option value="GMT0BST,M3.5.0/1,M10.5.0">UK</option><option value="UTC0">UTC</option></select></div>
+   <div><label>Change page every (seconds, 0 = only with the button)</label><input id="rotate" type="number" min="0"></div></div>
+  <label><input type="checkbox" id="clock24"> 24-hour clock</label>
+  <label><input type="checkbox" id="tempF"> Show temperatures in °F (direct mode)</label>
+  <div class="row"><div><label>A value is stale after (minutes)</label><input id="stale" type="number" min="1"></div>
+  <div><label>Full (flashing) refresh after this many updates</label><input id="fullEvery" type="number" min="1"></div>
+  <div><label>Panel driver</label><select id="driver"><option value="t7">7.5" V2 (GDEW075T7)</option><option value="gdey">7.5" V2, newer batch (GDEY075T7)</option></select></div></div>
+  <p class="hint">If the picture is faint, smeared or partial updates misbehave, try the other driver (restart needed). Check DIP switch 1 is on <b>A</b>.</p>
+  <div class="btns"><button class="btn pri" onclick="saveDisplay()">Save display settings</button></div>
+ </div>
+</section>
+
+<section id="t-system">
+ <div class="card"><h2>Panel</h2>
+  <div class="row"><div><label>Name (also <i>name</i>.local and its id in Coeno)</label><input id="name"></div>
+  <div><label>Settings password (user "admin"; blank = keep)</label><input id="adminPass" type="password" autocomplete="new-password"></div></div>
+  <label><input type="checkbox" id="adminClear"> Remove the settings password</label>
+  <div class="btns"><button class="btn pri" onclick="saveSystem()">Save</button></div>
+ </div>
+ <div class="card"><h2>Firmware</h2><div class="kv" id="fw"></div>
+  <div class="btns"><button class="btn" onclick="post('/api/update/check').then(()=>setTimeout(refresh,4000))">Check now</button>
+  <button class="btn pri" id="installBtn" onclick="if(confirm('Install the update from Coeno? The panel restarts.'))post('/api/update/install')">Install update</button>
+  <button class="btn" onclick="post('/api/reboot')">Restart</button></div>
+ </div>
+ <div class="card"><h2>Start over</h2><p class="hint">Erases Wi-Fi, logins and gauges. Holding the BOOT button for 25 s does the same.</p>
+  <button class="btn bad" onclick="if(prompt('Type erase to wipe all settings')==='erase')post('/api/factory-reset',{confirm:'erase'})">Erase all settings</button></div>
+</section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+let S={},C={},R=[];
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),2600)}
+async function get(u){const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw new Error(u+' '+r.status);return r.json()}
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+ const j=await r.json().catch(()=>({}));if(!r.ok||j.ok===false){toast(j.error||('failed: '+r.status));throw new Error(j.error)}return j}
+function later(){setTimeout(refresh,2500)}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+ document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+ document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==='t-'+b.dataset.t));
+ if(b.dataset.t==='gauges')loadReadings();});
+function pill(ok,t){return `<span class="pill ${ok?'ok':'bad'}">${esc(t)}</span>`}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function age(s){return s<90?s+' s':s<5400?Math.round(s/60)+' min':Math.round(s/3600)+' h'}
+
+async function refresh(){
+ try{S=await get('/api/status')}catch(e){$('sub').textContent='panel not answering';return}
+ $('title').textContent=S.name;$('sub').textContent=`${S.mode==='coeno'?'Coeno mode':'Direct mode'} · build ${S.build} · ${S.wifi.text}`;
+ $('screen').src='/screen.bmp?t='+Date.now();
+ const kv=[['Wi-Fi',S.wifi.online?pill(true,S.wifi.ssid+' '+S.wifi.rssi+' dBm'):pill(false,'offline')],['Address',esc(S.wifi.ip)],
+  ['Coeno',pill(S.coeno.connected,S.coeno.text)],['Apex',pill(S.apex.ok,S.apex.text)],['Hydros',pill(S.hydros.ok,S.hydros.text)],
+  ['Page',`${S.page+1} of ${S.pages}`],['Up',age(S.uptime_s)],['Memory',`${Math.round(S.heap/1024)} kB free (low ${Math.round(S.heap_min/1024)})`],
+  ['Refreshes',`${S.refreshes} (${S.full_refreshes} full)`]];
+ $('kv').innerHTML=kv.map(([k,v])=>`<div>${k}</div><div>${v}</div>`).join('');
+ const al=S.alarms||[];$('alarm').classList.toggle('on',al.length>0&&!S.acked);
+ $('alarmText').textContent=al.map(a=>a.text).join(' · ');
+ $('fw').innerHTML=`<div>Running</div><div>build ${S.build} (${esc(S.version)})</div><div>Board</div><div>${esc(S.board)}</div><div>Coeno</div><div>${esc(S.update.text)}</div>`+
+  (S.reboot_needed?'<div>Note</div><div><b>Restart to apply the name/driver change.</b></div>':'');
+ $('installBtn').disabled=!(S.update.available_build>0);
+}
+
+async function loadSettings(){
+ C=await get('/api/settings');
+ document.querySelectorAll('input[name=mode]').forEach(r=>r.checked=r.value===C.mode);
+ $('coenoHost').value=C.coeno.host;$('coenoPort').value=C.coeno.port;$('coenoUpdates').checked=C.coeno.updates;
+ $('apexOn').checked=C.apex.on;$('apexHost').value=C.apex.host;$('apexUser').value=C.apex.user;$('apexPass').value='';
+ $('apexPass').placeholder=C.apex.pass.set?'saved — leave blank to keep':'';$('apexPoll').value=C.apex.poll_s;$('apexUnit').value=C.apex.temp_unit;
+ $('hydrosOn').checked=C.hydros.on;$('hydrosUser').value=C.hydros.user;$('hydrosPass').value='';
+ $('hydrosPass').placeholder=C.hydros.pass.set?'saved — leave blank to keep':'';
+ const d=C.display;$('tz').value=d.tz;if($('tz').value!==d.tz){const o=new Option(d.tz,d.tz);$('tz').add(o);$('tz').value=d.tz}
+ $('rotate').value=d.rotate_s;$('clock24').checked=d.clock24;$('tempF').checked=d.temp_f;$('stale').value=Math.round(d.stale_s/60);
+ $('fullEvery').value=d.full_every;$('driver').value=d.driver;
+ $('name').value=C.name;$('adminPass').value='';$('adminPass').placeholder=C.admin_pass.set?'set — leave blank to keep':'none';
+ $('coenoNote').style.display=C.mode==='coeno'?'block':'none';
+ renderWifi();renderPages();renderGauges();
+}
+async function save(part,msg){const j=await post('/api/settings',part);toast(msg||'Saved');if(j.reboot_needed)toast('Saved — restart to apply');await loadSettings();later();}
+
+// ── Wi-Fi
+function renderWifi(){
+ $('wifiList').innerHTML=C.wifi.length?C.wifi.map((w,i)=>`<tr><td><b>${esc(w.ssid)}</b><div class="muted">${w.pass.set?'password saved':'open network'}${S.wifi&&S.wifi.ssid===w.ssid?' · connected':''}</div></td>
+  <td style="text-align:right"><button class="btn mini" onclick="moveWifi(${i},-1)">↑</button> <button class="btn mini bad" onclick="delWifi(${i})">Remove</button></td></tr>`).join('')
+  :'<tr><td class="muted">None yet.</td></tr>';
+}
+function wifiPayload(list){return {wifi:list.map(w=>({ssid:w.ssid}))}}
+function delWifi(i){if(!confirm('Forget '+C.wifi[i].ssid+'?'))return;const l=C.wifi.slice();l.splice(i,1);save(wifiPayload(l),'Forgotten')}
+function moveWifi(i,d){const l=C.wifi.slice();const j=i+d;if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];save(wifiPayload(l))}
+async function scan(){toast('Scanning…');const l=await get('/api/wifi/scan');l.sort((a,b)=>b.rssi-a.rssi);
+ $('scanSel').innerHTML='<option value="">— pick —</option>'+l.map(n=>`<option value="${esc(n.ssid)}">${esc(n.ssid)} (${n.rssi} dBm${n.secure?'':' · open'})</option>`).join('')}
+function addWifi(){const ssid=$('newSsid').value.trim();if(!ssid)return toast('Enter the network name');
+ const l=C.wifi.filter(w=>w.ssid!==ssid).map(w=>({ssid:w.ssid}));l.unshift({ssid,pass:$('newPass').value});
+ save({wifi:l},'Saved — joining '+ssid).then(()=>{$('newPass').value=''});}
+
+// ── data source
+function saveData(){const mode=(document.querySelector('input[name=mode]:checked')||{}).value||'coeno';
+ const b={mode,coeno:{host:$('coenoHost').value.trim(),port:+$('coenoPort').value||1883,updates:$('coenoUpdates').checked},
+  apex:{on:$('apexOn').checked,host:$('apexHost').value.trim(),user:$('apexUser').value.trim(),poll_s:+$('apexPoll').value||60,temp_unit:$('apexUnit').value},
+  hydros:{on:$('hydrosOn').checked,user:$('hydrosUser').value.trim()}};
+ if($('apexPass').value)b.apex.pass=$('apexPass').value;if($('hydrosPass').value)b.hydros.pass=$('hydrosPass').value;save(b);}
+async function testApex(){const r=$('apexRes');r.className='result';r.textContent='Trying…';
+ try{const j=await post('/api/test/apex',{host:$('apexHost').value.trim(),user:$('apexUser').value.trim(),pass:$('apexPass').value});
+ r.textContent=j.result;r.className='result '+(j.result.startsWith('ok')?'ok':'bad')}catch(e){r.textContent='failed'}}
+async function testHydros(){const r=$('hydrosRes');r.className='result';r.textContent='Signing in…';
+ try{const j=await post('/api/test/hydros',{user:$('hydrosUser').value.trim(),pass:$('hydrosPass').value});
+ r.textContent=j.result;r.className='result '+(j.result.startsWith('ok')?'ok':'bad')}catch(e){r.textContent='failed'}}
+
+// ── pages + gauges
+let P=[],G=[];
+function renderPages(){P=(C.pages||[]).map(p=>({...p}));G=(C.gauges||[]).map(g=>({...g}));drawPages();drawGauges()}
+function drawPages(){$('pages').innerHTML=P.map((p,i)=>`<div class="row" style="align-items:end"><div><label>Page ${i+1} title</label><input value="${esc(p.title)}" oninput="P[${i}].title=this.value"></div>
+ <div><label>Layout</label><select onchange="P[${i}].layout=this.value">${['auto','single','2x2','3x2','list'].map(l=>`<option ${p.layout===l?'selected':''}>${l}</option>`).join('')}</select></div>
+ <div>${P.length>1?`<button class="btn mini bad" onclick="P.splice(${i},1);G.forEach(g=>{if(g.page>${i})g.page--;else if(g.page==${i})g.page=0});drawPages();drawGauges()">Remove</button>`:''}</div></div>`).join('')}
+function addPage(){if(P.length>=6)return toast('6 pages at most');P.push({title:'Page '+(P.length+1),layout:'auto'});drawPages();drawGauges()}
+function readingOpts(sel){const groups={};for(const r of R){(groups[r.source+' · '+r.device]??=[]).push(r)}
+ let h=`<option value="">— pick a reading —</option>`;let found=!sel;
+ for(const [g,list] of Object.entries(groups)){h+=`<optgroup label="${esc(g)}">`+list.map(r=>{if(r.key===sel)found=true;
+  return `<option value="${esc(r.key)}" ${r.key===sel?'selected':''}>${esc(r.name)} — ${r.value==null?'--':(+r.value).toFixed(2)} ${esc(r.unit)}</option>`}).join('')+'</optgroup>'}
+ if(!found)h+=`<option value="${esc(sel)}" selected>${esc(sel)} (not seen yet)</option>`;return h}
+const nv=v=>v==null||Number.isNaN(v)?'':v;
+function drawGauges(){$('gauges').innerHTML=G.length?G.map((g,i)=>`<div class="g"><div class="top"><select onchange="pick(${i},this.value)">${readingOpts(g.key)}</select>
+ <button class="btn mini" onclick="mv(${i},-1)">↑</button><button class="btn mini" onclick="mv(${i},1)">↓</button><button class="btn mini bad" onclick="G.splice(${i},1);drawGauges()">✕</button></div>
+ <div class="row"><div><label>Label</label><input value="${esc(g.label)}" placeholder="reading's name" oninput="G[${i}].label=this.value"></div>
+ <div><label>Unit</label><input value="${esc(g.unit)}" placeholder="auto" oninput="G[${i}].unit=this.value"></div>
+ <div><label>Decimals</label><input type="number" min="0" max="4" value="${g.dec}" oninput="G[${i}].dec=+this.value"></div>
+ <div><label>Page</label><select onchange="G[${i}].page=+this.value">${P.map((p,k)=>`<option value="${k}" ${g.page==k?'selected':''}>${k+1}. ${esc(p.title)}</option>`).join('')}</select></div></div>
+ <div class="row"><div><label>Normal from</label><input value="${nv(g.warn_lo)}" oninput="G[${i}].warn_lo=this.value"></div><div><label>Normal to</label><input value="${nv(g.warn_hi)}" oninput="G[${i}].warn_hi=this.value"></div>
+ <div><label>Alarm below</label><input value="${nv(g.alarm_lo)}" oninput="G[${i}].alarm_lo=this.value"></div><div><label>Alarm above</label><input value="${nv(g.alarm_hi)}" oninput="G[${i}].alarm_hi=this.value"></div></div></div>`).join('')
+ :'<p class="muted">No gauges yet.</p>'}
+const DEF={ph:[2,7.9,8.4,7.6,8.6],temp:[1,25,26.7,24,28],orp:[0,250,450,null,null],cond:[1,33.5,35.3,32,36.5],alk:[2,7,8.5,6.5,10],calc:[0,400,450,350,500],mag:[0,1250,1400,1150,1500]};
+function pick(i,key){const g=G[i];g.key=key;const r=R.find(x=>x.key===key);if(!r)return;
+ const d=DEF[r.kind];if(d&&g.warn_lo==null&&g.warn_hi==null){[g.dec,g.warn_lo,g.warn_hi,g.alarm_lo,g.alarm_hi]=d;
+  if(r.kind==='temp'&&C.display.temp_f){g.warn_lo=77;g.warn_hi=80;g.alarm_lo=75;g.alarm_hi=82.5}}drawGauges()}
+function mv(i,d){const j=i+d;if(j<0||j>=G.length)return;[G[i],G[j]]=[G[j],G[i]];drawGauges()}
+function addGauge(){if(G.length>=40)return toast('40 gauges at most');G.push({key:'',label:'',unit:'',dec:1,page:Math.max(0,P.length-1),warn_lo:null,warn_hi:null,alarm_lo:null,alarm_hi:null});drawGauges()}
+async function loadReadings(){try{R=await get('/api/readings');R.sort((a,b)=>(a.source+a.device+a.name).localeCompare(b.source+b.device+b.name));drawGauges()}catch(e){}}
+function num(v){if(v===''||v==null)return null;const n=parseFloat(v);return Number.isNaN(n)?null:n}
+function saveGauges(){const gauges=G.filter(g=>g.key).map(g=>({key:g.key,label:g.label,unit:g.unit,dec:g.dec,page:g.page,
+ warn_lo:num(g.warn_lo),warn_hi:num(g.warn_hi),alarm_lo:num(g.alarm_lo),alarm_hi:num(g.alarm_hi)}));save({pages:P,gauges})}
+
+// ── display + system
+function saveDisplay(){save({display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,temp_f:$('tempF').checked,
+ stale_s:Math.max(1,+$('stale').value||10)*60,full_every:+$('fullEvery').value||60,driver:$('driver').value}})}
+function saveSystem(){const b={name:$('name').value.trim()};if($('adminClear').checked)b.admin_pass={clear:true};else if($('adminPass').value)b.admin_pass=$('adminPass').value;save(b)}
+
+refresh().then(loadSettings);setInterval(refresh,30000);
+</script>
+</body>
+</html>

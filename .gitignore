@@ -1,0 +1,5 @@
+.pio/
+.vscode/
+tools/host/out/
+src/web_ui.h
+include/secrets.h
