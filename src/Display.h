@@ -25,7 +25,8 @@ uint32_t refreshes();
 uint32_t fullRefreshes();
 // The current frame as a 1-bit BMP, for the settings page preview.
 size_t bmpSize();
-void writeBmp(uint8_t *out);
+void bmpHeader(uint8_t out[62]);  // 1-bit BMP header + palette
+const uint8_t *row(int y);        // one 100-byte row of the frame (1 = ink)
 // Ask for a full refresh with the next show().
 void requestFull();
 

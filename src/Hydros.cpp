@@ -251,6 +251,64 @@ float numberOf(JsonVariantConst v) {
   return NAN;
 }
 
+// Streaming zlib → ArduinoJson reader. The decompressor (~11 kB) and its
+// 32 kB window are allocated on first use and kept, so a long session doesn't
+// fragment the heap message by message.
+struct InflateReader {
+  tinfl_decompressor *d = nullptr;
+  uint8_t *dict = nullptr;
+  const uint8_t *in = nullptr;
+  size_t inLeft = 0;
+  size_t outPos = 0, readPos = 0, readEnd = 0;  // window positions
+  bool done = false, failed = false;
+  int status = 0;
+
+  bool ready() {
+    if (!d) d = (tinfl_decompressor *)malloc(sizeof(tinfl_decompressor));
+    if (!dict) dict = (uint8_t *)malloc(TINFL_LZ_DICT_SIZE);
+    return d && dict;
+  }
+  void start(const uint8_t *data, size_t n) {
+    tinfl_init(d);
+    in = data;
+    inLeft = n;
+    outPos = readPos = readEnd = 0;
+    done = failed = false;
+    status = 0;
+  }
+  bool refill() {
+    if (done) return false;
+    size_t inSize = inLeft, outSize = TINFL_LZ_DICT_SIZE - outPos;
+    tinfl_status st = tinfl_decompress(d, in, &inSize, dict, dict + outPos, &outSize,
+                                       TINFL_FLAG_PARSE_ZLIB_HEADER | (inLeft > inSize ? TINFL_FLAG_HAS_MORE_INPUT : 0));
+    in += inSize;
+    inLeft -= inSize;
+    readPos = outPos;
+    readEnd = outPos + outSize;
+    outPos = (outPos + outSize) & (TINFL_LZ_DICT_SIZE - 1);
+    status = (int)st;
+    if (st == TINFL_STATUS_DONE) done = true;
+    else if (st < 0) { failed = true; done = true; }
+    else if (st == TINFL_STATUS_NEEDS_MORE_INPUT && inLeft == 0) { failed = true; done = true; }
+    return readEnd > readPos;
+  }
+  int read() {
+    while (readPos >= readEnd)
+      if (!refill()) return -1;
+    return dict[readPos++];
+  }
+  size_t readBytes(char *b, size_t n) {
+    size_t k = 0;
+    while (k < n) {
+      int c = read();
+      if (c < 0) break;
+      b[k++] = (char)c;
+    }
+    return k;
+  }
+};
+InflateReader inflater;
+
 void handlePayload(const String &topic, uint8_t *data, size_t len) {
   // "<user>/<thing>/rsp/LISTEN/statusc/<mac>"
   int a = topic.indexOf('/'), b = topic.indexOf('/', a + 1);
@@ -268,43 +326,31 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
       n = len - i - 1;
       break;
     }
-  uint8_t *json = p;
-  size_t jlen = n;
-  uint8_t *out = nullptr;
-  if (n > 2 && p[0] == 0x78) {
-    // Inflate into the biggest block the heap can spare (the panel's frame and
-    // two TLS sessions already take ~130 kB).
-    size_t cap = min<size_t>(96 * 1024, ESP.getMaxAllocHeap() > 20480 ? ESP.getMaxAllocHeap() - 16384 : 0);
-    if (cap < 8192) {
-      Serial.printf("[hydros] %s: no memory to inflate (%u bytes free)\n", topic.c_str(), (unsigned)ESP.getMaxAllocHeap());
-      return;
-    }
-    out = (uint8_t *)malloc(cap);
-    tinfl_decompressor *d = (tinfl_decompressor *)malloc(sizeof(tinfl_decompressor));
-    if (!out || !d) { free(out); free(d); return; }
-    tinfl_init(d);
-    size_t inLen = n, outLen = cap;
-    tinfl_status st = tinfl_decompress(d, p, &inLen, out, out, &outLen,
-                                       TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
-    free(d);
-    if (st != TINFL_STATUS_DONE) {
-      Serial.printf("[hydros] %s: zlib failed (%d%s)\n", topic.c_str(), (int)st,
-                    st == TINFL_STATUS_HAS_MORE_OUTPUT ? ", bigger than the free memory" : "");
-      free(out);
-      return;
-    }
-    json = out;
-    jlen = outLen;
-  }
   JsonDocument filter;
   filter["Input"]["*"]["probeValue"] = true;
   filter["Input"]["*"]["senseValue"] = true;
   filter["Input"]["*"]["i10Value"] = true;
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, (const char *)json, jlen, DeserializationOption::Filter(filter));
-  free(out);
+  DeserializationError err;
+  if (n > 2 && p[0] == 0x78) {
+    // Inflate as a stream through a fixed 32 kB window (allocated once), so the
+    // size of the JSON inside doesn't matter. See InflateReader.
+    if (!inflater.ready()) {
+      Serial.printf("[hydros] no memory to inflate (largest free block %u bytes)\n", (unsigned)ESP.getMaxAllocHeap());
+      return;
+    }
+    inflater.start(p, n);
+    err = deserializeJson(doc, inflater, DeserializationOption::Filter(filter));
+    if (inflater.failed) {
+      Serial.printf("[hydros] %s: zlib failed (%d)\n", topic.c_str(), inflater.status);
+      return;
+    }
+  } else {
+    err = deserializeJson(doc, (const char *)p, n, DeserializationOption::Filter(filter));
+  }
   if (err) {
-    Serial.printf("[hydros] %s: %u bytes, JSON %s\n", topic.c_str(), (unsigned)len, err.c_str());
+    Serial.printf("[hydros] %s: %u bytes, JSON %s (free %u)\n", topic.c_str(), (unsigned)len, err.c_str(),
+                  (unsigned)ESP.getFreeHeap());
     return;
   }
   lastMsg = millis();

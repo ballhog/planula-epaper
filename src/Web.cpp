@@ -237,25 +237,35 @@ void handleRefresh() {
 
 void handleScreen() {
   if (!allowed()) return;
-  size_t n = display::bmpSize();
-  uint8_t *buf = (uint8_t *)malloc(n);
-  if (!buf) return err(503, "out of memory");
-  display::writeBmp(buf);
+  // Header, then rows bottom-up straight from the frame buffer: no 48 kB copy
+  // (that copy plus a Hydros TLS session ran the heap dry on the first board).
+  uint8_t hdr[62];
+  display::bmpHeader(hdr);
   server.sendHeader("Cache-Control", "no-store");
-  server.setContentLength(n);
+  server.setContentLength(display::bmpSize());
   server.send(200, "image/bmp", "");
   NetworkClient cl = server.client();
-  size_t off = 0;
   uint32_t start = millis();
-  while (off < n && cl.connected() && millis() - start < 15000) {
-    size_t w = cl.write(buf + off, min<size_t>(1024, n - off));
-    if (w == 0) {  // send buffer full on a weak link: wait, don't drop
-      delay(20);
-      continue;
+  auto put = [&](const uint8_t *b, size_t n) {
+    size_t off = 0;
+    while (off < n && cl.connected() && millis() - start < 20000) {
+      size_t w = cl.write(b + off, n - off);
+      if (w == 0) {
+        delay(10);
+        continue;
+      }
+      off += w;
     }
-    off += w;
+    return off == n;
+  };
+  if (!put(hdr, sizeof hdr)) return;
+  const int row = 800 / 8;
+  uint8_t chunk[row * 10];
+  for (int y = 479; y >= 0; y -= 10) {
+    int n = 0;
+    for (int k = 0; k < 10 && y - k >= 0; k++, n++) memcpy(chunk + n * row, display::row(y - k), row);
+    if (!put(chunk, n * row)) return;
   }
-  free(buf);
 }
 
 void handleFactory() {

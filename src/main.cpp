@@ -471,6 +471,8 @@ void loop() {
   }
   if (now - lastState > 60000UL) {
     lastState = now;
+    Serial.printf("[mem] free %u, largest block %u, lowest %u\n", (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
     publishState();
   }
   if (rebootAsked && (int32_t)(now - rebootAt) > 0) ESP.restart();

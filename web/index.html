@@ -171,7 +171,7 @@ function age(s){return s<90?s+' s':s<5400?Math.round(s/60)+' min':Math.round(s/3
 async function refresh(){
  try{S=await get('/api/status')}catch(e){$('sub').textContent='panel not answering';return}
  $('title').textContent=S.name;$('sub').textContent=`${S.mode==='coeno'?'Coeno mode':'Direct mode'} · build ${S.build} · ${S.wifi.text}`;
- $('screen').src='/screen.bmp?t='+Date.now();
+ if($('t-panel').classList.contains('on'))$('screen').src='/screen.bmp?t='+Date.now();
  const kv=[['Wi-Fi',S.wifi.online?pill(true,S.wifi.ssid+' '+S.wifi.rssi+' dBm'):pill(false,'offline')],['Address',esc(S.wifi.ip)],
   ['Coeno',pill(S.coeno.connected,S.coeno.text)],['Apex',pill(S.apex.ok,S.apex.text)],['Hydros',pill(S.hydros.ok,S.hydros.text)],
   ['Page',`${S.page+1} of ${S.pages}`],['Up',age(S.uptime_s)],['Memory',`${Math.round(S.heap/1024)} kB free (low ${Math.round(S.heap_min/1024)})`],

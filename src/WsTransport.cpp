@@ -60,26 +60,32 @@ int writeAll(Ctx *c, const uint8_t *buf, int len, int timeoutMs) {
 }
 
 int sendFrame(Ctx *c, uint8_t opcode, const uint8_t *data, size_t len, int timeoutMs) {
-  uint8_t hdr[14];
+  // Header + masked payload in one write. Small frames (all MQTT control
+  // packets) use the stack; bigger ones a heap block, failing softly when the
+  // heap is short instead of aborting.
+  uint8_t stackBuf[600];
+  size_t need = len + 14;
+  uint8_t *f = need <= sizeof stackBuf ? stackBuf : (uint8_t *)malloc(need);
+  if (!f) return -1;
   size_t h = 0;
-  hdr[h++] = 0x80 | opcode;  // FIN
-  if (len < 126) hdr[h++] = 0x80 | len;
+  f[h++] = 0x80 | opcode;  // FIN
+  if (len < 126) f[h++] = 0x80 | len;
   else if (len < 65536) {
-    hdr[h++] = 0x80 | 126;
-    hdr[h++] = len >> 8;
-    hdr[h++] = len & 0xFF;
+    f[h++] = 0x80 | 126;
+    f[h++] = len >> 8;
+    f[h++] = len & 0xFF;
   } else {
-    hdr[h++] = 0x80 | 127;
-    for (int i = 7; i >= 0; i--) hdr[h++] = (uint64_t)len >> (8 * i);
+    f[h++] = 0x80 | 127;
+    for (int i = 7; i >= 0; i--) f[h++] = (uint64_t)len >> (8 * i);
   }
   uint8_t mask[4];
   esp_fill_random(mask, 4);
-  memcpy(hdr + h, mask, 4);
+  memcpy(f + h, mask, 4);
   h += 4;
-  std::string frame((const char *)hdr, h);
-  frame.resize(h + len);
-  for (size_t i = 0; i < len; i++) frame[h + i] = data[i] ^ mask[i & 3];
-  return writeAll(c, (const uint8_t *)frame.data(), frame.size(), timeoutMs) < 0 ? -1 : (int)len;
+  for (size_t i = 0; i < len; i++) f[h + i] = data[i] ^ mask[i & 3];
+  int r = writeAll(c, f, h + len, timeoutMs);
+  if (f != stackBuf) free(f);
+  return r < 0 ? -1 : (int)len;
 }
 
 int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutMs) {
@@ -95,35 +101,48 @@ int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutM
   size_t klen = 0;
   esp_fill_random(keyRaw, sizeof keyRaw);
   mbedtls_base64_encode(key, sizeof key, &klen, keyRaw, sizeof keyRaw);
-  std::string req = "GET " + c->path + " HTTP/1.1\r\nHost: " + host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-                    "Sec-WebSocket-Key: " + std::string((const char *)key, klen) + "\r\nSec-WebSocket-Version: 13\r\n";
-  if (!c->subprotocol.empty()) req += "Sec-WebSocket-Protocol: " + c->subprotocol + "\r\n";
-  req += "User-Agent: planula-epaper\r\n\r\n";
-  if (writeAll(c, (const uint8_t *)req.data(), req.size(), timeoutMs) < 0) {
+  key[klen] = 0;
+  size_t cap = c->path.size() + strlen(host) + c->subprotocol.size() + 256;
+  char *req = (char *)malloc(cap);
+  if (!req) {
+    Serial.printf("[ws] no memory for the upgrade request (%u free)\n", (unsigned)ESP.getMaxAllocHeap());
+    return -1;
+  }
+  int rl = snprintf(req, cap,
+                    "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                    "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n%s%s%sUser-Agent: planula-epaper\r\n\r\n",
+                    c->path.c_str(), host, (const char *)key, c->subprotocol.empty() ? "" : "Sec-WebSocket-Protocol: ",
+                    c->subprotocol.c_str(), c->subprotocol.empty() ? "" : "\r\n");
+  int w = (rl > 0 && (size_t)rl < cap) ? writeAll(c, (const uint8_t *)req, rl, timeoutMs) : -1;
+  free(req);
+  if (w < 0) {
     Serial.println("[ws] sending the upgrade request failed");
     return -1;
   }
   // Read the response headers (stop at the blank line; keep anything after it).
-  std::string resp;
-  char buf[256];
+  char resp[1024];
+  size_t got = 0;
   uint32_t start = millis();
-  size_t end;
-  while ((end = resp.find("\r\n\r\n")) == std::string::npos) {
-    if (resp.size() > 4096 || millis() - start > (uint32_t)timeoutMs) {
+  char *end = nullptr;
+  while (!(end = (char *)memmem(resp, got, "\r\n\r\n", 4))) {
+    if (got >= sizeof resp - 1 || millis() - start > (uint32_t)timeoutMs) {
       Serial.println("[ws] no upgrade response");
       return -1;
     }
-    int r = esp_transport_read(c->ssl, buf, sizeof buf, 1000);
+    int r = esp_transport_read(c->ssl, resp + got, sizeof resp - 1 - got, 1000);
     if (r < 0) {
       Serial.println("[ws] connection closed during upgrade");
       return -1;
     }
-    resp.append(buf, r);
+    got += r;
   }
-  c->pre = resp.substr(end + 4);
-  std::string status = resp.substr(0, resp.find("\r\n"));
-  if (status.find(" 101") == std::string::npos) {
-    Serial.printf("[ws] upgrade refused: %s\n", status.c_str());
+  size_t hdrLen = end - resp + 4;
+  c->pre.assign(resp + hdrLen, got - hdrLen);
+  resp[got] = 0;
+  char *eol = strstr(resp, "\r\n");
+  if (eol) *eol = 0;
+  if (!strstr(resp, " 101")) {
+    Serial.printf("[ws] upgrade refused: %s\n", resp);
     return -1;
   }
   return 0;

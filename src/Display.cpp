@@ -103,7 +103,7 @@ uint32_t fullRefreshes() { return nFull; }
 
 size_t bmpSize() { return 62 + (size_t)panel::kW / 8 * panel::kH; }
 
-void writeBmp(uint8_t *o) {
+void bmpHeader(uint8_t *o) {
   const uint32_t rowBytes = panel::kW / 8;  // 100, already a multiple of 4
   const uint32_t img = rowBytes * panel::kH;
   const uint32_t size = 62 + img;
@@ -119,8 +119,8 @@ void writeBmp(uint8_t *o) {
   // palette: index 0 = paper, 1 = ink
   o[54] = 0xEC; o[55] = 0xEC; o[56] = 0xEC;
   o[58] = 0x1C; o[59] = 0x1C; o[60] = 0x1C;
-  const uint8_t *b = cv->getBuffer();
-  for (int y = 0; y < panel::kH; y++) memcpy(o + 62 + (size_t)(panel::kH - 1 - y) * rowBytes, b + (size_t)y * rowBytes, rowBytes);
 }
+
+const uint8_t *row(int y) { return cv->getBuffer() + (size_t)y * (panel::kW / 8); }
 
 }  // namespace display
