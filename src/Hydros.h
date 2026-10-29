@@ -17,7 +17,10 @@ namespace hydros {
 
 void loop();
 void restart();     // drop the session; loop() logs in again
-void reserve();     // grab the 43 kB inflate buffers early, before the heap fragments
+void reserve();
+// pause(true): close the AWS session and stay offline until pause(false)
+// (frees its TLS memory for an update check). Returns true if it was running.
+bool pause(bool on);     // grab the 43 kB inflate buffers early, before the heap fragments
 String test(const String &user, const String &pass);  // login + list controllers
 String status();
 bool ok();

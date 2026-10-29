@@ -83,7 +83,8 @@ void handleRoot() {
   if (captive()) return;
   if (!allowed()) return;
   server.sendHeader("Cache-Control", "no-store");
-  server.send_P(200, "text/html", WEB_UI);
+  server.sendHeader("Content-Encoding", "gzip");
+  server.send_P(200, "text/html", (const char *)WEB_UI_GZ, WEB_UI_GZ_LEN);
 }
 
 void handleStatus() {

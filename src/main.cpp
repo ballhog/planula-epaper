@@ -40,7 +40,7 @@
 static const int PIN_BUTTON = 0;  // BOOT
 
 // Pages (a few kB each) and the renderer live on the loop task's stack.
-SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+SET_LOOP_TASK_STACK_SIZE(12 * 1024);
 
 namespace {
 
@@ -445,15 +445,21 @@ void updates() {
   if (due) {
     checkAsked = false;
     lastCheck = millis();
+    // One TLS session at a time: the GitHub check needs ~40 kB the Hydros
+    // stream is holding. Pause it, check, let it reconnect.
+    bool paused = hydros::pause(true);
     checkUpdates();
+    if (paused && !(availBuild > 0 && s.autoUpdate)) hydros::pause(false);
     Serial.printf("[update] %s\n", updateText.c_str());
     if (availBuild > 0 && s.autoUpdate && alarms.empty()) installAsked = true;
   }
   if (installAsked) {
     installAsked = false;
+    hydros::pause(true);
     if (availBuild <= 0) checkUpdates();
-    if (availBuild > 0) installUpdate();
+    if (availBuild > 0) installUpdate();  // restarts on success
     else app::redraw(false);
+    hydros::pause(false);
   }
 }
 

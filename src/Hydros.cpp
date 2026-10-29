@@ -35,7 +35,8 @@ esp_mqtt_client_handle_t client = nullptr;
 volatile bool connected = false;
 volatile uint32_t lastMsg = 0;
 volatile uint32_t connectedAt = 0;
-bool onlyFirst = false;  // AWS dropped us after asking every controller: ask the first only
+bool onlyFirst = false;
+bool paused = false;  // AWS dropped us after asking every controller: ask the first only
 uint32_t sessionStart = 0, nextTry = 0, backoff = 15000;
 String state = "off", userId;
 String lastLogged;
@@ -260,6 +261,7 @@ struct InflateReader {
   const uint8_t *in = nullptr;
   size_t inLeft = 0;
   size_t outPos = 0, readPos = 0, readEnd = 0;  // window positions
+  size_t produced = 0;                           // inflated bytes this message
   bool done = false, failed = false;
   int status = 0;
 
@@ -273,7 +275,7 @@ struct InflateReader {
     tinfl_init(d);
     in = data;
     inLeft = n;
-    outPos = readPos = readEnd = 0;
+    outPos = readPos = readEnd = produced = 0;
     done = failed = false;
     status = 0;
   }
@@ -286,6 +288,7 @@ struct InflateReader {
     inLeft -= inSize;
     readPos = outPos;
     readEnd = outPos + outSize;
+    produced += outSize;
     outPos = (outPos + outSize) & (TINFL_LZ_DICT_SIZE - 1);
     status = (int)st;
     if (st == TINFL_STATUS_DONE) done = true;
@@ -342,6 +345,9 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     }
     inflater.start(p, n);
     err = deserializeJson(doc, inflater, DeserializationOption::Filter(filter));
+    while (inflater.read() >= 0) {}  // finish, so `produced` is the full size
+    static uint32_t sizeLogs = 0;
+    if (sizeLogs++ < 3) Serial.printf("[hydros] inflated %u -> %u bytes\n", (unsigned)n, (unsigned)inflater.produced);
     if (inflater.failed) {
       Serial.printf("[hydros] %s: zlib failed (%d)\n", topic.c_str(), inflater.status);
       return;
@@ -495,6 +501,7 @@ bool startClient() {
 
 void loop() {
   const Settings &s = settings::get();
+  if (paused) return;
   if (!s.hydrosOn || s.mode != "direct") {
     if (client) stopClient();
     setState(s.hydrosOn ? "on (used in direct mode)" : "off");
@@ -527,6 +534,8 @@ void loop() {
     return;
   }
   setState("logging in");
+  Serial.printf("[mem] before Hydros login: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
   String err = connectSteps(s.hydrosUser, s.hydrosPass, false, nullptr);
   if (err.length()) {
     setState(err);
@@ -548,6 +557,21 @@ void loop() {
 void reserve() {
   if (!inflater.ready())
     Serial.printf("[hydros] couldn't reserve inflate memory (largest block %u)\n", (unsigned)ESP.getMaxAllocHeap());
+}
+
+bool pause(bool on) {
+  if (on) {
+    bool was = client != nullptr;
+    if (client) {
+      Serial.println("[hydros] pausing the AWS session for an update check");
+      stopClient();
+    }
+    paused = true;
+    return was;
+  }
+  paused = false;
+  nextTry = 0;
+  return false;
 }
 
 void restart() {

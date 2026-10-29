@@ -163,7 +163,9 @@ const $=id=>document.getElementById(id);
 let S={},C={},R=[];
 function toast(t){const e=$('toast');e.textContent=t;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),2600)}
 async function get(u){const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw new Error(u+' '+r.status);return r.json()}
-async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+async function post(u,b){const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),20000);let r;
+ try{r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{}),signal:ac.signal})}
+ catch(e){toast('The panel didn\'t answer (busy or weak Wi-Fi). Try again.');throw e}finally{clearTimeout(tm)}
  const j=await r.json().catch(()=>({}));if(!r.ok||j.ok===false){toast(j.error||('failed: '+r.status));throw new Error(j.error)}return j}
 function later(){setTimeout(refresh,2500)}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
