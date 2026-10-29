@@ -242,7 +242,19 @@ void handleScreen() {
   if (!buf) return err(503, "out of memory");
   display::writeBmp(buf);
   server.sendHeader("Cache-Control", "no-store");
-  server.send_P(200, "image/bmp", (const char *)buf, n);
+  server.setContentLength(n);
+  server.send(200, "image/bmp", "");
+  NetworkClient cl = server.client();
+  size_t off = 0;
+  uint32_t start = millis();
+  while (off < n && cl.connected() && millis() - start < 15000) {
+    size_t w = cl.write(buf + off, min<size_t>(1024, n - off));
+    if (w == 0) {  // send buffer full on a weak link: wait, don't drop
+      delay(20);
+      continue;
+    }
+    off += w;
+  }
   free(buf);
 }
 

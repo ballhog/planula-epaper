@@ -272,7 +272,13 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
   size_t jlen = n;
   uint8_t *out = nullptr;
   if (n > 2 && p[0] == 0x78) {
-    size_t cap = 96 * 1024;
+    // Inflate into the biggest block the heap can spare (the panel's frame and
+    // two TLS sessions already take ~130 kB).
+    size_t cap = min<size_t>(96 * 1024, ESP.getMaxAllocHeap() > 20480 ? ESP.getMaxAllocHeap() - 16384 : 0);
+    if (cap < 8192) {
+      Serial.printf("[hydros] %s: no memory to inflate (%u bytes free)\n", topic.c_str(), (unsigned)ESP.getMaxAllocHeap());
+      return;
+    }
     out = (uint8_t *)malloc(cap);
     tinfl_decompressor *d = (tinfl_decompressor *)malloc(sizeof(tinfl_decompressor));
     if (!out || !d) { free(out); free(d); return; }
@@ -282,7 +288,8 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
                                        TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
     free(d);
     if (st != TINFL_STATUS_DONE) {
-      Serial.printf("[hydros] %s: zlib failed (%d)\n", topic.c_str(), (int)st);
+      Serial.printf("[hydros] %s: zlib failed (%d%s)\n", topic.c_str(), (int)st,
+                    st == TINFL_STATUS_HAS_MORE_OUTPUT ? ", bigger than the free memory" : "");
       free(out);
       return;
     }
@@ -337,8 +344,10 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
         auto &t = things[i];
         String rspT = userId + "/" + t.id + "/rsp/#";
         String reqT = userId + "/" + t.id + "/req/LISTEN/statusc";
-        esp_mqtt_client_subscribe(e->client, rspT.c_str(), 1);
-        esp_mqtt_client_publish(e->client, reqT.c_str(), "", 0, 1, 0);
+        int sid = esp_mqtt_client_subscribe(e->client, rspT.c_str(), 1);
+        int pid = esp_mqtt_client_publish(e->client, reqT.c_str(), "", 0, 1, 0);
+        Serial.printf("[hydros] %s: subscribe %s (msg %d), request %s (msg %d)\n", t.name.c_str(), rspT.c_str(), sid,
+                      reqT.c_str(), pid);
       }
       break;
     case MQTT_EVENT_DISCONNECTED:
@@ -356,12 +365,28 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
                       (int)e->error_handle->error_type, (unsigned)e->error_handle->esp_tls_last_esp_err,
                       e->error_handle->esp_transport_sock_errno, (int)e->error_handle->connect_return_code);
       break;
+    case MQTT_EVENT_SUBSCRIBED:
+      // data = the SUBACK return code(s): 0..2 = granted QoS, 0x80 = refused by AWS's policy
+      Serial.printf("[hydros] subscription msg %d: %s\n", e->msg_id,
+                    (e->data_len > 0 && (uint8_t)e->data[0] == 0x80) ? "REFUSED by AWS" : "granted");
+      break;
+    case MQTT_EVENT_PUBLISHED:
+      Serial.printf("[hydros] request msg %d delivered\n", e->msg_id);
+      break;
     case MQTT_EVENT_DATA: {
       if (e->current_data_offset == 0) {
         rxTopic = String(e->topic, e->topic_len);
         rxLen = 0;
         size_t need = e->total_data_len;
-        if (need > 64 * 1024) { rxCap = 0; break; }  // too big to hold: skip
+        static uint32_t msgs = 0;
+        if (++msgs <= 3) Serial.printf("[hydros] message on %s, %u bytes\n", rxTopic.c_str(), (unsigned)need);
+        if (need > 96 * 1024) {  // too big to hold: skip
+          Serial.printf("[hydros] skipped %u-byte message on %s (too big)\n", (unsigned)need, rxTopic.c_str());
+          rxCap = 0;
+          free(rx);
+          rx = nullptr;
+          break;
+        }
         if (need > rxCap) {
           free(rx);
           rx = (char *)malloc(need);
