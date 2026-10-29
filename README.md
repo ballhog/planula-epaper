@@ -125,13 +125,23 @@ lib/ota               pull OTA from Coeno with SHA-256 and rollback (shared with
 tools/mkfonts.py      Inter → Adafruit GFX fonts (adds °, µ, ³, ₂, —, ·, ▲, ▼)
 ```
 
-## Not verified on hardware yet
+## Verified on hardware (Waveshare board, builds 1-19)
 
-Written and compiled, but not yet run on the board:
+Driver `t7` with switch 1 on A; Hydros cloud login and IoT stream; Apex `/rest/status` (AC6 5.16_AC26, through an SSH tunnel).
+Still open: GPIO2 "LED" (unused), runs longer than ~20 min.
 
-- First light: which driver (`t7` or `gdey`) suits this panel, and whether switch 1 needs A or B.
-- Hydros cloud login and the IoT stream from the panel (the steps mirror pyhydros; the AWS IoT WebSocket path and the payload format are the parts to watch).
-- Apex `/rest/status` against your firmware.
-- Whether GPIO2 drives the board's "LED" (not used yet).
+## Seeed reTerminal E1001 (`env:reterminal`, compiles, not yet run)
+
+Pins from Seeed's docs; whole frame in PSRAM; own firmware image (`planula-epaper-s3`, GitHub `latest-s3.json`).
+
+Planned once the unit is here (decided 2026-10-29):
+
+- **Buttons**: left / right = previous / next page. Refresh: short = acknowledge alarm and silence the buzzer, or fetch now; hold 3 s = info screen; hold 10 s = setup network. Left + right held = factory reset. Any button wakes it from sleep. (Right is GPIO5; the other two pins still to find.)
+- **Power modes** (Settings):
+  - **Live**: wall power, as today.
+  - **Saver**: wake every few minutes; redraw only when a value moves more than a step (pH 0.02, temp 0.1°, salinity 0.1 ppt, ORP 5 mV) or a status changes, and at least hourly. Shows "updated 10:40", not a running clock.
+  - **Daily**: one update a day at a set time, plus any button press, plus an **hourly alarm check**: wake for a few seconds, compare against alarm limits, sleep again without touching the screen unless something is out of range (then redraw with the alarm tile and beep). The screen says plainly how old the readings are ("Readings from 7:00 this morning").
+  - Battery wakes go through Coeno or Apex (seconds on the LAN). Hydros direct needs a 10-20 s cloud login per wake, so it suits Live mode, or Coeno doing the Hydros side.
+- SHT40 room temperature / humidity as gauges; buzzer for alarms.
 
 Fonts: Inter, SIL Open Font License 1.1. QR code: Nayuki, MIT.
