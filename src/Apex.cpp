@@ -6,14 +6,18 @@
 #include <esp_heap_caps.h>
 
 #include "Readings.h"
+#include "Worker.h"
 #include "Settings.h"
 
 namespace apex {
 
-static uint32_t lastPoll = 0, lastOk = 0;
-static bool force = true, okNow = false;
-static String state = "not set up";
-static int inputs = 0;
+// loop() decides when; the poll itself runs on the worker task.
+static uint32_t lastPoll = 0;
+static volatile uint32_t lastOk = 0;
+static volatile bool force = true, okNow = false;
+static SharedText state("not set up");
+static volatile int inputs = 0;
+static int8_t shown = -1;  // idle text on screen (-1 none): don't rewrite it every loop
 
 static float parseValue(JsonVariantConst v) {
   if (v.is<float>() || v.is<int>()) return v.as<float>();
@@ -101,30 +105,46 @@ static String poll(const String &hostIn, const String &user, const String &pass,
   return "";
 }
 
+static void pollJob(String host, String user, String pass) {
+  int n = 0;
+  String err = poll(host, user, pass, true, &n);
+  bool good = !err.length();
+  Serial.printf("[apex] poll %s: %s (8-bit free %u, largest %u)\n", host.c_str(),
+                good ? (String(n) + " inputs").c_str() : err.c_str(),
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  if (good) {
+    inputs = n;
+    lastOk = millis();
+    String st = "ok · " + String(n) + " inputs";
+    if (readings::dropped()) st += " · some not kept (panel full)";
+    state.set(st);
+  } else {
+    state.set(err);
+  }
+  okNow = good;
+}
+
 void loop() {
   const Settings &s = settings::get();
   if (!s.apexOn || s.mode != "direct") {
     okNow = false;
-    state = s.apexOn ? "on (used in direct mode)" : "off";
+    if (shown != (int8_t)s.apexOn) {
+      shown = (int8_t)s.apexOn;
+      state.set(s.apexOn ? "on (used in direct mode)" : "off");
+    }
+    lastPoll = 0;
+    force = true;
     return;
   }
+  shown = -1;
   uint32_t every = (uint32_t)s.apexPoll_s * 1000UL;
   if (!force && millis() - lastPoll < every && lastPoll) return;
+  if (worker::pending("apex")) return;
   force = false;
   lastPoll = millis();
-  String err = poll(s.apexHost, s.apexUser, s.apexPass, true, &inputs);
-  okNow = !err.length();
-  Serial.printf("[apex] poll %s: %s (8-bit free %u, largest %u)\n", s.apexHost.c_str(),
-                okNow ? (String(inputs) + " inputs").c_str() : err.c_str(),
-                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  if (okNow) {
-    lastOk = millis();
-    state = "ok · " + String(inputs) + " inputs";
-    if (readings::dropped()) state += " · some not kept (panel full)";
-  } else {
-    state = err;
-  }
+  String host = s.apexHost, user = s.apexUser, pass = s.apexPass;
+  worker::post("apex", [host, user, pass] { pollJob(host, user, pass); });
 }
 
 void pollNow() { force = true; }
@@ -137,8 +157,8 @@ String test(const String &host, const String &user, const String &pass) {
 }
 
 String status() {
-  if (okNow && lastOk) return state + " · " + String((millis() - lastOk) / 1000) + " s ago";
-  return state;
+  if (okNow && lastOk) return state.get() + " · " + String((millis() - lastOk) / 1000) + " s ago";
+  return state.get();
 }
 bool ok() { return okNow; }
 uint32_t lastOkMs() { return lastOk; }

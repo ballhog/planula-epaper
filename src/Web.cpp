@@ -1,5 +1,9 @@
 #include "Web.h"
 
+#include <functional>
+
+#include "Worker.h"
+
 #include <ArduinoJson.h>
 #include <WebServer.h>
 #include <Update.h>
@@ -175,6 +179,41 @@ void handleScan() {
   sendRaw(200, net::scanJson());
 }
 
+// The Test buttons: POST starts the test on the worker task, GET returns
+// {pending, result}; the page polls. (A test that blocked here froze the page
+// and the panel for as long as the login took.)
+struct TestSlot {
+  volatile bool running = false;
+  SharedText result;
+};
+TestSlot apexTest, hydrosTest;
+
+void startTest(TestSlot &t, const char *tag, std::function<String()> fn) {
+  if (!t.running) {
+    t.running = true;
+    t.result.set("");
+    if (!worker::post(tag, [&t, fn] {
+          t.result.set(fn());
+          t.running = false;
+        })) {
+      t.running = false;
+      t.result.set("busy, try again in a moment");
+    }
+  }
+  JsonDocument d;
+  d["pending"] = (bool)t.running;
+  d["result"] = t.result.get();
+  sendJson(200, d);
+}
+
+void testResult(TestSlot &t) {
+  if (!allowed()) return;
+  JsonDocument d;
+  d["pending"] = (bool)t.running;
+  d["result"] = t.result.get();
+  sendJson(200, d);
+}
+
 void handleTestApex() {
   if (!allowed()) return;
   JsonDocument in;
@@ -184,9 +223,7 @@ void handleTestApex() {
   String user = in["user"] | s.apexUser.c_str();
   String pass = in["pass"] | "";
   if (!pass.length()) pass = s.apexPass;
-  JsonDocument d;
-  d["result"] = apex::test(host, user, pass);
-  sendJson(200, d);
+  startTest(apexTest, "apex-test", [host, user, pass] { return apex::test(host, user, pass); });
 }
 
 void handleTestHydros() {
@@ -197,9 +234,7 @@ void handleTestHydros() {
   String user = in["user"] | s.hydrosUser.c_str();
   String pass = in["pass"] | "";
   if (!pass.length()) pass = s.hydrosPass;
-  JsonDocument d;
-  d["result"] = hydros::test(user, pass);
-  sendJson(200, d);
+  startTest(hydrosTest, "hydros-test", [user, pass] { return hydros::test(user, pass); });
 }
 
 void handleReadings() {
@@ -341,6 +376,8 @@ void begin() {
   server.on("/api/wifi/scan", HTTP_GET, handleScan);
   server.on("/api/test/apex", HTTP_POST, handleTestApex);
   server.on("/api/test/hydros", HTTP_POST, handleTestHydros);
+  server.on("/api/test/apex", HTTP_GET, [] { testResult(apexTest); });
+  server.on("/api/test/hydros", HTTP_GET, [] { testResult(hydrosTest); });
   server.on("/api/readings", HTTP_GET, handleReadings);
   server.on("/api/page", HTTP_POST, handlePage);
   server.on("/api/refresh", HTTP_POST, handleRefresh);

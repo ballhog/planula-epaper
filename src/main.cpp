@@ -30,6 +30,7 @@
 #include "Render.h"
 #include "Settings.h"
 #include "Web.h"
+#include "Worker.h"
 #include "ota.h"
 
 #ifndef FW_BUILD
@@ -42,13 +43,16 @@
 static const int PIN_BUTTON = 0;  // BOOT
 
 // Pages (a few kB each) and the renderer live on the loop task's stack.
-SET_LOOP_TASK_STACK_SIZE(12 * 1024);
+// Network calls run on the worker task (12 kB, Worker.cpp); loop() only draws
+// and serves the page. The [mem] line logs how much of each stack is unused.
+SET_LOOP_TASK_STACK_SIZE(8 * 1024);
 
 namespace {
 
 int curPage = 0, nPages = 1;
 uint32_t lastRotate = 0, lastDraw = 0, lastState = 0, infoUntil = 0, lastReminder = 0;
-bool redrawAsked = true, fullAsked = false, identifyAsked = false;
+volatile bool redrawAsked = true;  // also set from the worker
+bool fullAsked = false, identifyAsked = false;
 bool healthy = false;
 
 // Alarms across all pages.
@@ -61,8 +65,11 @@ bool acked = false;
 bool flashAsked = false;
 
 // Updates.
-long availBuild = 0;
-String updateText = "not checked yet";
+// Checks and installs run on the worker task (Worker.h); these are shared.
+volatile long availBuild = 0;
+SharedText updateText("not checked yet");
+volatile const char *updatingFrom = nullptr;  // set while a download runs: draw() shows it
+volatile bool autoInstallReady = false;
 uint32_t lastCheck = 0;
 bool checkAsked = false, installAsked = false, rebootAsked = false, needsReboot = false;
 uint32_t rebootAt = 0;
@@ -102,7 +109,9 @@ bool fetchPage(int i, panel::Page &p) {
 
 void collectAlarms() {
   std::vector<Alarm> now;
-  panel::Page p;
+  std::unique_ptr<panel::Page> pp(new (std::nothrow) panel::Page());  // 3.4 kB: not on the loop stack
+  if (!pp) return;
+  panel::Page &p = *pp;
   for (int i = 0; i < nPages; i++) {
     if (!fetchPage(i, p)) continue;
     for (int k = 0; k < p.n; k++) {
@@ -210,7 +219,12 @@ void draw() {
   const Settings &s = settings::get();
   display::Scene scene;
 
-  if (net::state() == net::State::SetupAp && !net::online()) {
+  if (const char *from = (const char *)updatingFrom) {
+    scene = message("Updating firmware",
+                    String("Downloading from ") + from + ". Don't unplug the panel.\nIt restarts by itself when done.",
+                    "", c);
+    screen = "updating";
+  } else if (net::state() == net::State::SetupAp && !net::online()) {
     String ap = net::apName(), pass = s.apPass, url = "http://192.168.4.1", why = net::setupReason();
     String left = s.name + " · setup mode";
     PANEL_COPY(c.footerLeft, left.c_str());
@@ -387,11 +401,11 @@ const char *kGithubManifest = "https://github.com/ballhog/planula-epaper/release
 String availSource, availUrl, availSha;
 size_t availSize = 0;
 
+// Called on the worker: the loop draws the notice (only it touches the display).
 void showUpdating(const char *from) {
-  panel::Chrome c;
-  fillChrome(c);
-  String body = String("Downloading from ") + from + ". Don't unplug the panel.\nIt restarts by itself when done.";
-  display::show(message("Updating firmware", body, "", c), false);
+  updatingFrom = from;
+  redrawAsked = true;
+  delay(3000);  // let the notice reach the screen before the download takes the CPU
 }
 
 void checkUpdates() {
@@ -405,23 +419,23 @@ void checkUpdates() {
     if (b > 0) {
       availBuild = b;
       availSource = "coeno";
-      updateText = "build " + String(b) + " ready on Coeno";
+      updateText.set("build " + String(b) + " ready on Coeno");
       return;
     }
     if (b == 0 && ota_last_http() != 404) {
-      updateText = "up to date (build " + String(FW_BUILD) + ", Coeno)";
+      updateText.set("up to date (build " + String(FW_BUILD) + ", Coeno)");
       return;
     }
     coenoWhy = String("Coeno: ") + ota_last_reason() + "; ";
   }
   if (!s.githubUpdates) {
-    updateText = coenoWhy.length() ? coenoWhy + "GitHub updates off" : "update checks off";
+    updateText.set(coenoWhy.length() ? coenoWhy + "GitHub updates off" : "update checks off");
     return;
   }
   JsonDocument m;
   https::Result r = https::requestJson("GET", kGithubManifest, {{"Accept", "application/json"}}, "", m, nullptr);
   if (r.status != 200 || r.error.length()) {
-    updateText = coenoWhy + "GitHub: " + (r.status < 0 ? r.error : "HTTP " + String(r.status));
+    updateText.set(coenoWhy + "GitHub: " + (r.status < 0 ? r.error : "HTTP " + String(r.status)));
     return;
   }
   long b = m["build"] | 0L;
@@ -431,9 +445,9 @@ void checkUpdates() {
     availUrl = m["url"].as<const char *>();
     availSha = m["sha256"] | "";
     availSize = m["size"] | 0;
-    updateText = "build " + String(b) + " ready on GitHub";
+    updateText.set("build " + String(b) + " ready on GitHub");
   } else {
-    updateText = coenoWhy + "up to date (build " + String(FW_BUILD) + ", GitHub)";
+    updateText.set(coenoWhy + "up to date (build " + String(FW_BUILD) + ", GitHub)");
   }
 }
 
@@ -442,7 +456,8 @@ void installUpdate() {
     showUpdating("GitHub");
     String e = https::downloadFirmware(availUrl, availSha, availSize, nullptr);
     if (e.length()) {
-      updateText = "update failed: " + e;
+      updatingFrom = nullptr;
+      updateText.set("update failed: " + e);
       app::redraw(false);
       return;
     }
@@ -455,40 +470,45 @@ void installUpdate() {
   String url = "http://" + s.coenoHost + ":8000/firmware/planula-epaper/latest.json";
   showUpdating("Coeno");
   if (!ota_check_and_apply(url.c_str(), nullptr)) {
-    updateText = String("update failed: ") + ota_last_reason();
+    updatingFrom = nullptr;
+    updateText.set(String("update failed: ") + ota_last_reason());
     app::redraw(false);
   }
 }
 
+void checkJob() {
+  checkUpdates();
+  Serial.printf("[update] %s (8-bit largest %u)\n", updateText.get().c_str(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  if (availBuild > 0 && settings::get().autoUpdate) autoInstallReady = true;
+  app::redraw(false);  // footer: "update ready"
+}
+
+void installJob() {
+  if (availBuild <= 0) checkUpdates();
+  if (availBuild > 0) installUpdate();  // restarts on success
+  else app::redraw(false);
+}
+
+// Decides when; the work runs on the worker. The GitHub check and download
+// take the TLS token, so a running Hydros session steps aside on its own.
 void updates() {
-  const Settings &s = settings::get();
   if (!net::online()) return;
-  // First check as soon as Wi-Fi is up, before Hydros has opened its session
-  // (build 15 checked at 90 s, which tore down the first Hydros session
-  // mid-start), then every 6 h.
+  if (worker::pending("update")) return;
+  // First check as soon as Wi-Fi is up, before Hydros has opened its session,
+  // then every 6 h.
   bool due = checkAsked || !lastCheck || millis() - lastCheck > 6UL * 3600UL * 1000UL;
-  if (due) {
-    checkAsked = false;
-    lastCheck = millis();
-    // One TLS session at a time: the GitHub check needs ~40 kB the Hydros
-    // stream is holding. Pause it, check, let it reconnect.
-    hydros::pause(true);
-    checkUpdates();
-    // Always resume, whether or not a session was open when the check began
-    // (build 10/11 only resumed if one was, so a check that landed between
-    // sessions left Hydros paused for good: "Hydros offline").
-    if (!(availBuild > 0 && s.autoUpdate)) hydros::pause(false);
-    Serial.printf("[update] %s (8-bit largest %u)\n", updateText.c_str(),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    if (availBuild > 0 && s.autoUpdate && alarms.empty()) installAsked = true;
+  if (autoInstallReady && alarms.empty()) {
+    autoInstallReady = false;
+    installAsked = true;
   }
   if (installAsked) {
     installAsked = false;
-    hydros::pause(true);
-    if (availBuild <= 0) checkUpdates();
-    if (availBuild > 0) installUpdate();  // restarts on success
-    else app::redraw(false);
-    hydros::pause(false);
+    worker::post("update", installJob);
+  } else if (due) {
+    checkAsked = false;
+    lastCheck = millis();
+    worker::post("update", checkJob);
   }
 }
 
@@ -537,7 +557,7 @@ void identify() {
   redrawAsked = true;
 }
 long availableBuild() { return availBuild; }
-String updateCheckText() { return updateText; }
+String updateCheckText() { return updateText.get(); }
 void checkUpdateSoon() { checkAsked = true; }
 void installUpdateSoon() { installAsked = true; }
 void rebootSoon() {
@@ -557,6 +577,7 @@ void setup() {
                 settings::get().name.c_str(), settings::get().mode.c_str());
   display::begin(settings::get().panelDriver);
   if (settings::get().mode == "direct" && settings::get().hydrosOn) hydros::reserve();
+  worker::begin();
   Serial.printf("[mem] after start: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
   net::begin();
@@ -617,9 +638,10 @@ void loop() {
     lastState = now;
     // 8-bit-capable RAM is what TLS, Wi-Fi and the page can use (getFreeHeap
     // also counts IRAM that only takes 32-bit words).
-    Serial.printf("[mem] free %u (8-bit %u), largest 8-bit block %u, lowest %u\n", (unsigned)ESP.getFreeHeap(),
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (unsigned)ESP.getMinFreeHeap());
+    Serial.printf("[mem] free %u (8-bit %u), largest 8-bit block %u, lowest %u; stack unused: loop %u, net %u\n",
+                  (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (unsigned)ESP.getMinFreeHeap(),
+                  (unsigned)uxTaskGetStackHighWaterMark(nullptr), (unsigned)worker::stackFree());
     publishState();
   }
   if (rebootAsked && (int32_t)(now - rebootAt) > 0) ESP.restart();

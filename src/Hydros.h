@@ -8,6 +8,7 @@
 //      <user>/<thing>/rsp/#, ask for status on <user>/<thing>/req/LISTEN/statusc
 // Payloads are JSON, sometimes zlib-compressed behind a short header.
 // Inputs go into readings as "hydros:<thing>/<input name>".
+// The login (steps 1-4) runs on the worker task; loop() starts the session.
 // The session is rebuilt every 50 min (before the AWS keys expire) and after
 // 10 min with no message, like Coeno's watchdog.
 #pragma once
@@ -17,11 +18,10 @@ namespace hydros {
 
 void loop();
 void restart();     // drop the session; loop() logs in again
-void reserve();
-// pause(true): close the AWS session and stay offline until pause(false)
-// (frees its TLS memory for an update check). Returns true if it was running.
-bool pause(bool on);     // grab the 43 kB inflate buffers early, before the heap fragments
-String test(const String &user, const String &pass);  // login + list controllers
+void reserve();     // grab the inflate buffers early, before the heap fragments
+// Login + list controllers. Blocking: call it from the worker task. A live
+// session steps aside while it runs (one TLS connection at a time).
+String test(const String &user, const String &pass);
 String status();
 bool ok();
 uint32_t lastMsgMs();

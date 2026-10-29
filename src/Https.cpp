@@ -5,10 +5,12 @@
 #include <esp_http_client.h>
 #include <mbedtls/sha256.h>
 
+#include "Worker.h"
+
 namespace https {
 
-Result request(const char *method, const String &url, const Headers &headers, const String &body, size_t maxBody,
-               int timeoutMs) {
+static Result requestImpl(const char *method, const String &url, const Headers &headers, const String &body,
+                          size_t maxBody, int timeoutMs) {
   Result r;
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
@@ -112,8 +114,8 @@ struct Reader {
 };
 }  // namespace
 
-Result requestJson(const char *method, const String &url, const Headers &headers, const String &body,
-                   JsonDocument &out, const JsonDocument *filter, int timeoutMs) {
+static Result requestJsonImpl(const char *method, const String &url, const Headers &headers, const String &body,
+                              JsonDocument &out, const JsonDocument *filter, int timeoutMs) {
   Result r;
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
@@ -145,7 +147,7 @@ Result requestJson(const char *method, const String &url, const Headers &headers
   return r;
 }
 
-String downloadFirmware(const String &url, const String &shaHex, size_t size, void (*progress)(int)) {
+static String downloadImpl(const String &url, const String &shaHex, size_t size, void (*progress)(int)) {
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
   cfg.timeout_ms = 20000;
@@ -205,6 +207,51 @@ String downloadFirmware(const String &url, const String &shaHex, size_t size, vo
   }
   if (!Update.end(true)) return Update.errorString();
   return "";
+}
+
+// ── public calls: each takes the TLS token for its duration ──────────────
+
+static const char *jobName() {
+  const char *j = worker::running();
+  return j[0] ? j : "https";
+}
+
+static String busyText() {
+  const char *h = tls::holder();
+  return String("busy: ") + (h[0] ? h : "another connection") + " is using the network";
+}
+
+Result request(const char *method, const String &url, const Headers &headers, const String &body, size_t maxBody,
+               int timeoutMs) {
+  if (!tls::acquire(jobName())) {
+    Result r;
+    r.status = -9;
+    r.error = busyText();
+    return r;
+  }
+  Result r = requestImpl(method, url, headers, body, maxBody, timeoutMs);
+  tls::release();
+  return r;
+}
+
+Result requestJson(const char *method, const String &url, const Headers &headers, const String &body,
+                   JsonDocument &out, const JsonDocument *filter, int timeoutMs) {
+  if (!tls::acquire(jobName())) {
+    Result r;
+    r.status = -9;
+    r.error = busyText();
+    return r;
+  }
+  Result r = requestJsonImpl(method, url, headers, body, out, filter, timeoutMs);
+  tls::release();
+  return r;
+}
+
+String downloadFirmware(const String &url, const String &shaHex, size_t size, void (*progress)(int)) {
+  if (!tls::acquire(jobName())) return busyText();
+  String e = downloadImpl(url, shaHex, size, progress);
+  tls::release();
+  return e;
 }
 
 }  // namespace https

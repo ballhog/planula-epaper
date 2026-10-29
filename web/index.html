@@ -231,12 +231,14 @@ function saveData(){const mode=(document.querySelector('input[name=mode]:checked
   apex:{on:$('apexOn').checked,host:$('apexHost').value.trim(),user:$('apexUser').value.trim(),poll_s:+$('apexPoll').value||60,temp_unit:$('apexUnit').value},
   hydros:{on:$('hydrosOn').checked,user:$('hydrosUser').value.trim()}};
  if($('apexPass').value)b.apex.pass=$('apexPass').value;if($('hydrosPass').value)b.hydros.pass=$('hydrosPass').value;save(b);}
-async function testApex(){const r=$('apexRes');r.className='result';r.textContent='Trying…';
- try{const j=await post('/api/test/apex',{host:$('apexHost').value.trim(),user:$('apexUser').value.trim(),pass:$('apexPass').value});
- r.textContent=j.result;r.className='result '+(j.result.startsWith('ok')?'ok':'bad')}catch(e){r.textContent='failed'}}
-async function testHydros(){const r=$('hydrosRes');r.className='result';r.textContent='Signing in…';
- try{const j=await post('/api/test/hydros',{user:$('hydrosUser').value.trim(),pass:$('hydrosPass').value});
- r.textContent=j.result;r.className='result '+(j.result.startsWith('ok')?'ok':'bad')}catch(e){r.textContent='failed'}}
+// Tests run in the background on the panel; ask until they finish.
+async function runTest(what,body,el,busy){const r=$(el);r.className='result';r.textContent=busy;
+ try{let j=await post('/api/test/'+what,body);const t0=Date.now();
+ while(j.pending&&Date.now()-t0<90000){await new Promise(z=>setTimeout(z,1000));j=await get('/api/test/'+what)}
+ const t=j.pending?'still running, check the status card':(j.result||'no answer');
+ r.textContent=t;r.className='result '+(t.startsWith('ok')?'ok':'bad')}catch(e){r.textContent='failed'}}
+function testApex(){runTest('apex',{host:$('apexHost').value.trim(),user:$('apexUser').value.trim(),pass:$('apexPass').value},'apexRes','Trying…')}
+function testHydros(){runTest('hydros',{user:$('hydrosUser').value.trim(),pass:$('hydrosPass').value},'hydrosRes','Signing in…')}
 
 // ── pages + gauges
 let P=[],G=[];

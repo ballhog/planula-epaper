@@ -83,6 +83,8 @@ On the Coeno side, `coeno/services/panel_pages.py` builds the pages every 60 s a
 - **Apex**: `GET http://<apex>/rest/status` with Basic auth (same call Coeno makes). Only `inputs` are kept (a JSON filter, so a large status doesn't run the board out of memory). Temperatures are converted to °C (°F detected from the value or set explicitly).
 - **Hydros**: the same cloud path as Coeno's `hydros_service` / pyhydros. A Cognito `USER_PASSWORD_AUTH` login gets an ID token. Then `cv.hydros.link/user` gives the controllers, `/thing/<id>` the Cognito identity and AWS IoT endpoint, and `GetCredentialsForIdentity` temporary keys. The panel then opens MQTT over a SigV4-signed WebSocket (`lib/sigv4`, checked against AWS's published example). It subscribes `<user>/<thing>/rsp/#` and requests `.../req/LISTEN/statusc`. Payloads may be zlib behind a short header (inflated with the ESP32's ROM miniz). The session is rebuilt every 50 min and after 10 min of silence.
 - Each value keeps a 24 h trend in RAM (one point per 30 min) for the sparklines; it starts empty after a restart.
+- **Where the network work runs**: `loop()` only draws, serves the settings page and reads the button. Apex polls, Hydros logins, update checks and downloads, and the Test buttons are queued to one background task (`src/Worker.*`) and run one at a time, so a slow Apex or login never freezes the page.
+- **One TLS connection at a time**: there's RAM for one (~40 kB). Every `https::` call takes a token (`tls::acquire`); the Hydros AWS session keeps it while it runs and steps aside when something else asks, then logs in again. Calling `https::` from `loop()` fails at once and logs `[tls] … called from loop()`.
 
 ## Building and testing
 

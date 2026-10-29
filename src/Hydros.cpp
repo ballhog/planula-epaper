@@ -14,6 +14,7 @@
 #include "Settings.h"
 #include "SigV4.h"
 #include "WsTransport.h"
+#include "Worker.h"
 #include "miniz.h"
 
 namespace hydros {
@@ -36,7 +37,14 @@ volatile bool connected = false;
 volatile uint32_t lastMsg = 0;
 volatile uint32_t connectedAt = 0;
 bool onlyFirst = false;
-bool paused = false;  // AWS dropped us after asking every controller: ask the first only
+// The AWS session holds the TLS token (see Worker.h) from login until stopClient().
+bool holdsTls = false;
+// Login runs on the worker; the loop picks the result up. gen discards a login
+// that finished after restart() (settings changed meanwhile).
+uint8_t gen = 0;
+volatile bool loginDone = false;
+uint8_t loginGen = 0;
+String loginErr;
 uint32_t sessionStart = 0, nextTry = 0, backoff = 15000;
 String state = "off", userId;
 String lastLogged;
@@ -430,6 +438,10 @@ void stopClient() {
   free(rx);
   rx = nullptr;
   rxCap = rxLen = 0;
+  if (holdsTls) {
+    holdsTls = false;
+    tls::release();
+  }
 }
 
 bool startClient() {
@@ -460,21 +472,84 @@ bool startClient() {
   return e == ESP_OK;
 }
 
+void loginJob(String user, String pass, uint8_t g) {
+  String err;
+  if (!tls::acquire("Hydros login")) {
+    err = "waiting for the network (" + String(tls::holder()) + ")";
+  } else {
+    Serial.printf("[mem] before Hydros login: 8-bit free %u, largest %u\n",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    err = connectSteps(user, pass, false, nullptr);
+    if (err.length()) tls::release();
+    else tls::detach("Hydros session");  // kept until stopClient()
+  }
+  loginErr = err;
+  loginGen = g;
+  loginDone = true;  // last: the loop reads loginErr after seeing this
+}
+
+// The loop's side of a finished login.
+void loginFinished(uint32_t now) {
+  loginDone = false;
+  String err = loginErr;
+  if (loginGen != gen) {  // settings changed while it ran: throw it away
+    if (!err.length()) tls::release();
+    nextTry = 0;
+    return;
+  }
+  // Safety net: TLS needs two ~17 kB blocks plus working space. If the heap is
+  // too fragmented for that three times running, restart (the e-paper keeps
+  // the last picture, so it's ~10 s with no visible change).
+  static uint8_t tlsMemFails = 0;
+  if (err.indexOf("ESP_ERR_HTTP_CONNECT") >= 0 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 45000) {
+    if (++tlsMemFails >= 3) {
+      Serial.printf("[hydros] heap too fragmented for TLS (largest 8-bit block %u); restarting\n",
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+      delay(200);
+      ESP.restart();
+    }
+  } else if (!err.length()) {
+    tlsMemFails = 0;
+  }
+  if (err.length()) {
+    setState(err);
+    nextTry = now + backoff;
+    backoff = min<uint32_t>(backoff * 2, 10UL * 60UL * 1000UL);
+    return;
+  }
+  holdsTls = true;
+  Serial.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s (request %u bytes)\n",
+                (unsigned)things.size(), things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str(),
+                (unsigned)wsPath.length());
+  sessionStart = millis();
+  if (!startClient()) {
+    setState("MQTT start failed");
+    stopClient();
+    nextTry = now + backoff;
+  }
+}
+
 }  // namespace
 
 void loop() {
   const Settings &s = settings::get();
-  if (paused) {
-    setState("paused for an update check");
-    return;
-  }
+  uint32_t now = millis();
+  if (loginDone) loginFinished(now);
   if (!s.hydrosOn || s.mode != "direct") {
     if (client) stopClient();
     setState(s.hydrosOn ? "on (used in direct mode)" : "off");
     return;
   }
-  uint32_t now = millis();
   if (client) {
+    // Someone needs the network's one TLS connection (update check, a Test
+    // button): step aside, log in again once they're done.
+    if (tls::wanted()) {
+      stopClient();
+      setState("paused: the panel needs the network for a moment");
+      nextTry = now + 1000;
+      return;
+    }
     bool expired = now - sessionStart > kRebuildMs;
     bool silent = connected && now - lastMsg > kSilentMs;
     bool dropped = !connected && now - sessionStart > 30000;
@@ -493,54 +568,23 @@ void loop() {
     }
     return;
   }
+  if (worker::pending("hydros")) return;  // login on its way
   if ((int32_t)(now - nextTry) < 0) return;
   if (!s.hydrosUser.length() || !s.hydrosPass.length()) {
     setState("e-mail and password needed");
     nextTry = now + 30000;
     return;
   }
+  if (!WiFi.isConnected()) return;
+  if (time(nullptr) < 1700000000) {
+    // SigV4 needs the clock; just booted, NTP answers within seconds.
+    setState("waiting for the clock (NTP)");
+    return;
+  }
   setState("logging in");
-  Serial.printf("[mem] before Hydros login: 8-bit free %u, largest %u\n",
-                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  String err = connectSteps(s.hydrosUser, s.hydrosPass, false, nullptr);
-  // Safety net: TLS needs two ~17 kB blocks plus working space. If the heap is
-  // too fragmented for that three times running, restart (the e-paper keeps
-  // the last picture, so it's ~10 s with no visible change).
-  static uint8_t tlsMemFails = 0;
-  if (err.indexOf("ESP_ERR_HTTP_CONNECT") >= 0 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 45000) {
-    if (++tlsMemFails >= 3) {
-      Serial.printf("[hydros] heap too fragmented for TLS (largest 8-bit block %u); restarting\n",
-                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-      delay(200);
-      ESP.restart();
-    }
-  } else if (!err.length()) {
-    tlsMemFails = 0;
-  }
-  if (err.length() && time(nullptr) < 1700000000) {
-    // No clock yet (just booted): SigV4 needs it. Look again in a second rather
-    // than waiting out the 15-30 s login backoff (build 15 took a minute to
-    // show Hydros data after every restart because of this).
-    setState(err);
-    nextTry = now + 1000;
-    return;
-  }
-  if (err.length()) {
-    setState(err);
-    nextTry = now + backoff;
-    backoff = min<uint32_t>(backoff * 2, 10UL * 60UL * 1000UL);
-    return;
-  }
-  Serial.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s (request %u bytes)\n",
-                (unsigned)things.size(), things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str(),
-                (unsigned)wsPath.length());
-  sessionStart = millis();
-  if (!startClient()) {
-    setState("MQTT start failed");
-    stopClient();
-    nextTry = now + backoff;
-  }
+  String user = s.hydrosUser, pass = s.hydrosPass;
+  uint8_t g = gen;
+  if (!worker::post("hydros", [user, pass, g] { loginJob(user, pass, g); })) nextTry = now + 1000;
 }
 
 void reserve() {
@@ -548,24 +592,10 @@ void reserve() {
     Serial.printf("[hydros] couldn't reserve inflate memory (largest block %u)\n", (unsigned)ESP.getMaxAllocHeap());
 }
 
-bool pause(bool on) {
-  if (on) {
-    bool was = client != nullptr;
-    if (client) {
-      Serial.println("[hydros] pausing the AWS session for an update check");
-      stopClient();
-    }
-    paused = true;
-    return was;
-  }
-  paused = false;
-  nextTry = 0;
-  return false;
-}
-
 void restart() {
   onlyFirst = false;
   stopClient();
+  gen++;
   nextTry = 0;
   backoff = 15000;
 }
@@ -577,11 +607,11 @@ String test(const String &user, const String &pass) {
   if (user == s.hydrosUser && pass == s.hydrosPass && ok())
     return "ok · signed in and streaming (" + String(things.size()) + " controller" +
            (things.size() == 1 ? "" : "s") + ")";
-  bool was = pause(true);
+  // Runs on the worker. Taking the token makes a live session step aside.
+  if (!tls::acquire("Hydros test")) return "busy: " + String(tls::holder()) + " is using the network";
   String summary;
   String err = connectSteps(user, pass, true, &summary);
-  pause(false);
-  (void)was;
+  tls::release();
   return err.length() ? err : "ok · " + summary;
 }
 
