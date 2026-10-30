@@ -1,6 +1,7 @@
 #include "Render.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -319,6 +320,244 @@ void footer(Adafruit_GFX &d, const Chrome &c) {
   if (rw) drawText(d, font::Small, kW - 14, y + 22, c.footerRight, fg, Right);
 }
 
+// ── timeline page: one lane per gauge, time across ───────────────────────
+
+// "2 PM" / "14:00" for an axis tick, "2:30 PM" / "14:30" for a time in text;
+// relative ("-6 h", "+30 min") when the page has no clock.
+void clockLabel(const Page &p, int t, bool axis, char *out, size_t n) {
+  if (p.clock < 0) {
+    if (t == 0) { copyStr(out, n, "now"); return; }
+    int a = t < 0 ? -t : t;
+    if (a % 60 == 0) snprintf(out, n, "%c%d h", t < 0 ? '-' : '+', a / 60);
+    else if (a > 90) snprintf(out, n, "%c%d:%02d", t < 0 ? '-' : '+', a / 60, a % 60);
+    else snprintf(out, n, "%c%d min", t < 0 ? '-' : '+', a);
+    return;
+  }
+  int m = ((p.clock + t) % 1440 + 1440) % 1440;
+  int h = m / 60, mi = m % 60;
+  if (!p.h12) {
+    snprintf(out, n, "%d:%02d", h, mi);
+    return;
+  }
+  int h12 = h % 12 ? h % 12 : 12;
+  const char *ap = h < 12 ? "AM" : "PM";
+  if (axis && mi == 0) snprintf(out, n, "%d %s", h12, ap);
+  else snprintf(out, n, "%d:%02d %s", h12, mi, ap);
+}
+
+int tickStep(int span) {
+  if (span <= 180) return 30;
+  if (span <= 480) return 60;
+  if (span <= 960) return 120;
+  if (span <= 1500) return 180;
+  return 360;
+}
+
+// What the lane's label cell says under the name: "80 %", "ON · off 2:30 PM",
+// "next 2:00 PM".
+void laneState(const Page &p, const Gauge &g, char *out, size_t n) {
+  char v[24], tm[16];
+  out[0] = 0;
+  switch (g.lane) {
+    case Lane::Level:
+    case Lane::Step: {
+      Gauge s = g;
+      if (!s.has) {
+        s.value = laneValueAt(g, 0);
+        s.has = !isnan(s.value);
+      }
+      formatValue(s, v, sizeof v);
+      if (s.has) snprintf(out, n, g.unit[0] ? "%s %s" : "%s", v, g.unit);
+      break;
+    }
+    case Lane::OnOff: {
+      float now = g.has ? g.value : laneValueAt(g, 0);
+      if (isnan(now)) break;
+      bool on = now > 0.5f;
+      for (int i = 0; i < g.nspark; i++) {
+        if (g.t[i] > 0 && g.t[i] < p.to && (g.spark[i] > 0.5f) != on) {
+          clockLabel(p, g.t[i], false, tm, sizeof tm);
+          snprintf(out, n, "%s · %s %s", on ? "ON" : "OFF", on ? "off" : "on", tm);
+          return;
+        }
+      }
+      copyStr(out, n, on ? "ON" : "OFF");
+      break;
+    }
+    case Lane::Events: {
+      for (int i = 0; i < g.nspark; i++) {
+        if (g.t[i] > 0) {
+          clockLabel(p, g.t[i], false, tm, sizeof tm);
+          snprintf(out, n, "next %s", tm);
+          return;
+        }
+      }
+      if (g.nspark) {
+        clockLabel(p, g.t[g.nspark - 1], false, tm, sizeof tm);
+        snprintf(out, n, "last %s", tm);
+      }
+      break;
+    }
+  }
+}
+
+void timeline(Adafruit_GFX &d, const Page &p) {
+  const int labelW = 176, axisH = 30;
+  const int x0 = kBodyX + labelW, x1 = kBodyX + kBodyW - 6, pw = x1 - x0;
+  const int span = p.to - p.from;
+  auto X = [&](float t) { return x0 + (int)lroundf((t - p.from) * pw / (float)span); };
+  auto T = [&](int x) { return p.from + (x - x0) * (float)span / pw; };
+
+  int n = p.n;
+  int laneH = (kBodyH - axisH) / n;
+  if (laneH > 86) laneH = 86;
+  int top = kBodyY + 2 + (kBodyH - axisH - laneH * n) / 2;
+  int bot = top + laneH * n;  // axis line
+
+  // Grid: dotted verticals at each tick.
+  int step = tickStep(span);
+  int base = p.clock >= 0 ? p.clock : 0;
+  int first = p.from + ((step - ((base + p.from) % step + step) % step) % step);
+  for (int t = first; t <= p.to; t += step)
+    for (int y = top; y < bot; y += 4) d.drawPixel(X(t), y, INK);
+
+  for (int i = 0; i < n; i++) {
+    const Gauge &g = p.g[i];
+    int ly = top + i * laneH;
+    bool alarm = g.status == Status::Alarm;
+    uint16_t fg = alarm ? PAPER : INK;
+    if (alarm) d.fillRoundRect(kBodyX, ly + 3, labelW - 12, laneH - 6, 6, INK);
+    else if (g.status == Status::Warn) thickRoundRect(d, kBodyX, ly + 3, labelW - 12, laneH - 6, 6, 3, INK);
+    // Label cell: name, and the state under it when there's room.
+    char st[40];
+    laneState(p, g, st, sizeof st);
+    bool two = laneH >= 46 && st[0];
+    int nameY = two ? ly + laneH / 2 - 2 : ly + laneH / 2 + 8;
+    drawTextFit(d, font::Body, kBodyX + 10, nameY, g.label, fg, labelW - 30);
+    if (two) drawTextFit(d, font::Small, kBodyX + 10, nameY + 22, st, fg, labelW - 30);
+    if (i < n - 1) dashedH(d, kBodyX + 6, x1, ly + laneH - 1, INK, 2, 4);
+
+    // Plot area of this lane.
+    int yt = ly + 8, yb = ly + laneH - 8;
+    if (g.nspark == 0) {
+      drawText(d, font::Small, x0 + 10, ly + laneH / 2 + 6, "no schedule", INK);
+      continue;
+    }
+    switch (g.lane) {
+      case Lane::Level:
+      case Lane::Step: {
+        float lo = 0, hi = 0;
+        if (g.hasRange) {
+          lo = g.lo;
+          hi = g.hi;
+        } else {
+          for (int k = 0; k < g.nspark; k++) {
+            if (!isnan(g.spark[k]) && g.spark[k] > hi) hi = g.spark[k];
+            if (!isnan(g.spark[k]) && g.spark[k] < lo) lo = g.spark[k];
+          }
+          if (!strcmp(g.unit, "%") && hi <= 100) hi = 100;
+        }
+        if (hi - lo < 1e-6f) hi = lo + 1;
+        auto Y = [&](float v) {
+          if (v < lo) v = lo;
+          if (v > hi) v = hi;
+          return yb - (int)lroundf((v - lo) / (hi - lo) * (yb - yt));
+        };
+        int xs = X(g.t[0] > p.from ? g.t[0] : p.from);
+        int xe = X(p.to);
+        int nowX = X(0), py = -1;
+        for (int x = xs; x <= xe; x++) {
+          float v = laneValueAt(g, T(x));
+          if (isnan(v)) { py = -1; continue; }
+          int y = Y(v);
+          bool past = x <= nowX;
+          if (past && (x - x0) % 3 == 0 && y < yb) d.drawFastVLine(x, y, yb - y + 1, INK);  // hatched = happened
+          if (py >= 0 && py != y) d.drawFastVLine(x, py < y ? py : y, abs(py - y) + 1, INK);
+          d.drawFastVLine(x, y, past ? 3 : 2, INK);
+          py = y;
+        }
+        if (xs <= nowX) d.drawFastHLine(xs, yb, (nowX < xe ? nowX : xe) - xs + 1, INK);
+        break;
+      }
+      case Lane::OnOff: {
+        int bh = (yb - yt) * 2 / 3, by = (yt + yb) / 2 - bh / 2;
+        for (int k = 0; k < g.nspark; k++) {
+          if (!(g.spark[k] > 0.5f)) continue;
+          int a = g.t[k], b = k + 1 < g.nspark ? g.t[k + 1] : p.to;
+          if (b <= p.from || a >= p.to) continue;
+          if (a < p.from) a = p.from;
+          if (b > p.to) b = p.to;
+          int xa = X(a), xb = X(b);
+          if (xb - xa < 3) xb = xa + 3;  // a short run still shows
+          int xn = X(0);
+          // happened: solid; scheduled: outline
+          if (a < 0) d.fillRect(xa, by, (b <= 0 ? xb : xn) - xa, bh, INK);
+          if (b > 0) {
+            int s = a > 0 ? xa : xn;
+            d.drawRect(s, by, xb - s, bh, INK);
+            d.drawRect(s + 1, by + 1, xb - s - 2, bh - 2, INK);
+          }
+        }
+        break;
+      }
+      case Lane::Events: {
+        int cy = (yt + yb) / 2 + (laneH >= 50 ? 8 : 0);
+        int lastLabelEnd = -1000;
+        for (int k = 0; k < g.nspark; k++) {
+          if (g.t[k] < p.from || g.t[k] > p.to) continue;
+          int x = X(g.t[k]);
+          if (g.t[k] <= 0) {
+            d.fillCircle(x, cy, 6, INK);
+          } else {
+            d.drawCircle(x, cy, 6, INK);
+            d.drawCircle(x, cy, 5, INK);
+          }
+          d.drawFastVLine(x, cy + 6, yb - cy - 4, INK);
+          if (laneH >= 50 && !isnan(g.spark[k])) {
+            Gauge s = g;
+            s.has = true;
+            s.value = g.spark[k];
+            char v[16];
+            formatValue(s, v, sizeof v);
+            int w = textWidth(font::Small, v);
+            if (x - w / 2 > lastLabelEnd + 4) {
+              drawText(d, font::Small, x, cy - 11, v, INK, Center);
+              lastLabelEnd = x + w / 2;
+            }
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // Axis: line, tick labels, "now".
+  d.fillRect(x0, bot, pw + 1, 2, INK);
+  int nowX = X(0);
+  char b[16];
+  clockLabel(p, 0, false, b, sizeof b);
+  int nw = textWidth(font::Small, b) + 14;
+  for (int t = first; t <= p.to; t += step) {
+    int x = X(t);
+    d.drawFastVLine(x, bot, 6, INK);
+    clockLabel(p, t, true, b, sizeof b);
+    int w = textWidth(font::Small, b);
+    int lx = x - w / 2;
+    if (lx < x0 - 20 || lx + w > kW - 4) continue;
+    if (lx + w > nowX - nw / 2 - 4 && lx < nowX + nw / 2 + 4) continue;  // the "now" tag wins
+    drawText(d, font::Small, x, bot + 24, b, INK, Center);
+  }
+  if (p.from < 0 && p.to > 0) {
+    d.fillRect(nowX - 1, top - 2, 3, bot - top + 2, INK);
+    clockLabel(p, 0, false, b, sizeof b);
+    int w = textWidth(font::Small, b) + 14;
+    int px = nowX - w / 2;
+    if (px + w > kW - 2) px = kW - 2 - w;
+    d.fillRoundRect(px, bot + 4, w, 24, 6, INK);
+    drawText(d, font::Small, px + 7, bot + 22, b, PAPER);
+  }
+}
+
 }  // namespace
 
 void gridFor(const Page &p, int &cols, int &rows) {
@@ -327,7 +566,8 @@ void gridFor(const Page &p, int &cols, int &rows) {
     case Layout::Single: cols = rows = 1; return;
     case Layout::Grid2x2: cols = 2; rows = 2; return;
     case Layout::Grid3x2: cols = 3; rows = 2; return;
-    case Layout::List: cols = rows = 0; return;
+    case Layout::List:
+    case Layout::Timeline: cols = rows = 0; return;
     default: break;
   }
   if (n <= 1) { cols = rows = 1; }
@@ -349,6 +589,10 @@ void render(Adafruit_GFX &d, const Page &p, const Chrome &c) {
     return;
   }
 
+  if (p.layout == Layout::Timeline) {
+    timeline(d, p);
+    return;
+  }
   int cols, rows;
   gridFor(p, cols, rows);
   if (cols == 0) {
@@ -449,6 +693,114 @@ void renderSetup(Adafruit_GFX &d, const SetupInfo &s, const Chrome &c) {
   drawTextFit(d, font::Body, x, y, "Add your Wi-Fi there, then Coeno,", INK, kW - x - 20);
   y += 28;
   drawTextFit(d, font::Body, x, y, "Apex or Hydros as the data source.", INK, kW - x - 20);
+}
+
+void renderSystem(Adafruit_GFX &d, const SystemInfo &s, const Chrome &c) {
+  d.fillScreen(PAPER);
+  Page p;
+  PANEL_COPY(p.title, "System");
+  Chrome hc = c;
+  hc.pages = 1;
+  hc.alarm[0] = 0;
+  header(d, p, hc);
+  footer(d, c);
+
+  // Left: the update card.
+  const int cx = kBodyX, cy = kBodyY + 4, cw = 452, ch = kBodyH - 8;
+  const int px = cx + 24;
+  bool inv = s.state == SystemInfo::Available;
+  uint16_t fg = inv ? PAPER : INK, bg = inv ? INK : PAPER;
+  if (inv) d.fillRoundRect(cx, cy, cw, ch, 12, INK);
+  else if (s.state == SystemInfo::Failed || s.state == SystemInfo::Installing) thickRoundRect(d, cx, cy, cw, ch, 12, 5, INK);
+  else thickRoundRect(d, cx, cy, cw, ch, 12, 2, INK);
+
+  const char *title = "Firmware";
+  switch (s.state) {
+    case SystemInfo::Checking: title = "Checking for updates…"; break;
+    case SystemInfo::UpToDate: title = "Up to date"; break;
+    case SystemInfo::Available: title = "Update available"; break;
+    case SystemInfo::Installing: title = "Updating"; break;
+    case SystemInfo::Failed: title = "Update failed"; break;
+    default: break;
+  }
+  int y = cy + 46;
+  drawTextFit(d, font::Head, px, y, title, fg, cw - 48);
+
+  // Installed / available build numbers.
+  y += 30;
+  char b[24];
+  drawText(d, font::Small, px, y, "INSTALLED", fg);
+  bool two = s.availBuild > 0 && (s.state == SystemInfo::Available || s.state == SystemInfo::Installing);
+  if (two) {
+    char from[32];
+    snprintf(from, sizeof from, "NEW · %s", s.availFrom);
+    drawTextFit(d, font::Small, px + 210, y, from, fg, cw - 240);
+  }
+  y += 60;
+  snprintf(b, sizeof b, "%ld", s.build);
+  drawText(d, font::NumM, px - 2, y, b, fg);
+  if (two) {
+    // a fat arrow made of a bar and a triangle (no arrow glyph in the fonts)
+    int ax = px + 150, ay = y - 22;
+    d.fillRect(ax, ay - 4, 22, 9, fg);
+    d.fillTriangle(ax + 20, ay - 14, ax + 20, ay + 14, ax + 40, ay, fg);
+    snprintf(b, sizeof b, "%ld", s.availBuild);
+    drawText(d, font::NumM, px + 208, y, b, fg);
+  }
+  y += 26;
+  drawTextFit(d, font::Small, px, y, s.version, fg, cw - 48);
+
+  // State body.
+  y += 40;
+  if (s.state == SystemInfo::Installing) {
+    int bw = cw - 48, bh = 30;
+    thickRoundRect(d, px, y, bw, bh, 8, 3, INK);
+    if (s.pct >= 0) {
+      int fw = (bw - 12) * (s.pct > 100 ? 100 : s.pct) / 100;
+      if (fw > 0) d.fillRoundRect(px + 6, y + 6, fw, bh - 12, 4, INK);
+      snprintf(b, sizeof b, "%d %%", s.pct);
+    } else {
+      copyStr(b, sizeof b, "starting…");
+    }
+    y += bh + 30;
+    char line[64];
+    snprintf(line, sizeof line, "Downloading from %s · %s", s.availFrom[0] ? s.availFrom : "Coeno", b);
+    drawTextFit(d, font::Body, px, y, line, INK, cw - 48);
+    y += 28;
+    drawTextFit(d, font::Body, px, y, "Don't unplug. It restarts by itself.", INK, cw - 48);
+  } else {
+    if (s.detail[0]) {
+      drawTextFit(d, font::Body, px, y, s.detail, fg, cw - 48);
+      y += 28;
+    }
+    if (s.checked[0]) drawTextFit(d, font::Small, px, y, s.checked, fg, cw - 48);
+  }
+
+  // Button hint along the bottom of the card.
+  if (s.hint[0] && s.state != SystemInfo::Installing) {
+    int hy = cy + ch - 56;
+    int hw = cw - 48;
+    if (inv) {
+      d.fillRoundRect(px, hy, hw, 38, 19, PAPER);
+      drawTextFit(d, font::Label, px + hw / 2, hy + 28, s.hint, INK, hw - 24, Center);
+    } else {
+      thickRoundRect(d, px, hy, hw, 38, 19, 2, INK);
+      const GFXfont *hf = textWidth(font::Body, s.hint) <= hw - 24 ? font::Body : font::Small;
+      drawTextFit(d, hf, px + hw / 2, hy + (hf == font::Body ? 26 : 25), s.hint, INK, hw - 24, Center);
+    }
+  }
+  (void)bg;
+
+  // Right: details.
+  int rx = cx + cw + 22, rw = kW - rx - 14;
+  int ry = cy + 30;
+  for (int i = 0; i < s.nrows && i < 8; i++) {
+    if (!s.keys[i] || !s.vals[i]) continue;
+    drawTextFit(d, font::Small, rx, ry, s.keys[i], INK, rw);
+    drawTextFit(d, font::Body, rx, ry + 24, s.vals[i], INK, rw);
+    ry += 50;
+    if (ry > kH - kFooterH - 20) break;
+  }
 }
 
 }  // namespace panel

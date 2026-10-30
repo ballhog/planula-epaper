@@ -30,8 +30,8 @@ Coeno is still used in direct mode when a host is set: firmware updates, panel s
 
 | Press | Does |
 |---|---|
-| short | acknowledge the alarm, or next page |
-| hold 3 s | info screen: IP, settings address, source status |
+| short | acknowledge the alarm, or next page. On the System screen: install the update (or retry it), else close |
+| hold 3 s | **System** screen (firmware + update state, address, sources). Held again while it's up: check for updates now |
 | hold 10 s | open the setup Wi-Fi network |
 | hold 25 s | erase all settings |
 
@@ -55,6 +55,38 @@ Passwords are stored on the panel (NVS) and never sent back to the browser.
 - Refresh: partial (no flash, < 1 s) when something visible changes, at most once a minute. Full (flashing) refresh after 60 partials or hourly, to clear ghosting. The panel's voltages are switched off between updates.
 
 ![Alarm](docs/screens/2-chem-3x2-alarm.png)
+
+### Schedule (timeline) pages
+
+`"layout": "timeline"`: each gauge is a lane, time runs across, a black line marks now. What already happened is drawn solid (hatched under a ramp, filled bars, filled dots); what is scheduled is drawn hollow. Up to 10 lanes and 48 points per lane.
+
+| Lane `kind` | For | Drawn as | Label cell says |
+|---|---|---|---|
+| `level` | light ramps, pump speed % | ramping line | current value, `85 %` |
+| `step` | setpoints, modes | line that holds until the next point | current value |
+| `onoff` (or `spans`) | outlets, ATO, heater, feed mode | bars | `ON · off 5:15 PM` |
+| `events` | doser shots, feedings | dots with the amount above | `next 3:00 PM` |
+
+The window is today (`"window": "day"`, midnight to midnight) or `from`/`to` minutes around now (default ±12 h). With `clock` (local minutes after midnight) the axis shows clock time (12/24 h follows the Display setting); without it, `-6 h … +6 h`. "Now" moves on between Coeno's pages.
+
+![Schedule page](docs/screens/8-schedule-day.png)
+
+```json
+{"v": 1, "title": "Schedule", "layout": "timeline", "window": "day", "clock": 860,
+ "gauges": [
+  {"id": "apex:Blues", "label": "Blues", "kind": "level", "unit": "%", "dec": 0,
+   "pts": [[-860, 0], [-380, 0], [-260, 85], [310, 85], [430, 20], [490, 0]]},
+  {"id": "apex:Return", "label": "Return", "kind": "onoff", "value": 1, "spans": [[-860, -375], [-365, 580]]},
+  {"id": "e4:alk", "label": "Alk doser", "kind": "events", "unit": "mL", "dec": 1,
+   "pts": [[-80, 2.5], [40, 2.5], [160, 2.5]]}]}
+```
+Times are minutes from the page's now (negative = happened). `pts` are `[minutes, value]`; `spans` are `[on, off]` pairs.
+
+### System screen and updates
+
+Hold the button 3 s. The left card shows the update state; the right column shows the address, mode, Wi-Fi and source status. When a newer build is on Coeno or GitHub the card turns black and **pressing the button installs it**; a progress bar follows (partial refresh every 10 %), then the panel restarts into the new build (rolls back by itself if it doesn't come up). A failed install opens this screen for 2 min with the reason; the footer says `update ready, hold 3 s` whenever one is waiting.
+
+![Update available](docs/screens/10-system-update.png)
 
 ## Coeno protocol (`PanelNode` in coeno `protocol/topics.py`)
 

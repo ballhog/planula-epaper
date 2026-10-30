@@ -154,6 +154,78 @@ static void samples() {
   chromeFor(c, 0, 1);
   shot(cv, "5-list", [&](Adafruit_GFX &d) { render(d, l, c); });
 
+  // 8. Schedule timeline: today, midnight to midnight, "now" 2:20 PM.
+  {
+    const char *js = R"({"v":1,"title":"Schedule","layout":"timeline","window":"day","clock":860,"gauges":[
+      {"id":"apex:Blues","label":"Blues","kind":"level","unit":"%","dec":0,
+       "pts":[[-860,0],[-380,0],[-260,85],[310,85],[430,20],[490,0],[580,0]]},
+      {"id":"apex:Whites","label":"Whites","kind":"level","unit":"%","dec":0,
+       "pts":[[-860,0],[-320,0],[-200,60],[250,60],[370,0],[580,0]]},
+      {"id":"apex:Return","label":"Return","kind":"onoff","value":1,
+       "spans":[[-860,-375],[-365,580]]},
+      {"id":"apex:Skimmer","label":"Skimmer","kind":"onoff","value":1,
+       "spans":[[-860,-372],[-357,-130],[-115,175],[190,580]]},
+      {"id":"apex:Heater","label":"Heater","kind":"onoff","value":0,
+       "spans":[[-800,-760],[-690,-640],[-560,-520],[-430,-405],[150,175],[300,330]]},
+      {"id":"e4:alk","label":"Alk doser","kind":"events","unit":"mL","dec":1,
+       "pts":[[-800,2.5],[-680,2.5],[-560,2.5],[-440,2.5],[-320,2.5],[-200,2.5],[-80,2.5],[40,2.5],[160,2.5],[280,2.5],[400,2.5],[520,2.5]]},
+      {"id":"feed","label":"Feeding","kind":"events","unit":"g","dec":0,
+       "pts":[[-372,null],[-130,null],[175,null]]}]})";
+    Page tp;
+    const char *e = parsePage(js, strlen(js), tp);
+    if (e[0]) printf("FAIL timeline sample: %s\n", e), failures++;
+    tp.h12 = true;
+    chromeFor(c, 0, 4);
+    shot(cv, "8-schedule-day", [&](Adafruit_GFX &d) { render(d, tp, c); });
+    // Same page, no clock on the page: relative axis, ±12 h.
+    const char *js2 = R"({"v":1,"title":"Last & next 6 h","layout":"timeline","from":-360,"to":360,"gauges":[
+      {"id":"apex:Blues","label":"Blues","kind":"level","unit":"%","dec":0,"pts":[[-380,0],[-260,85],[310,85],[430,20]]},
+      {"id":"apex:ATO","label":"ATO pump","kind":"onoff","value":0,"spans":[[-300,-296],[-190,-186],[-75,-71]]},
+      {"id":"e4:alk","label":"Alk doser","kind":"events","dec":1,"pts":[[-320,2.5],[-200,2.5],[-80,2.5],[40,2.5],[160,2.5],[280,2.5]]}]})";
+    Page tq;
+    e = parsePage(js2, strlen(js2), tq);
+    if (e[0]) printf("FAIL timeline sample 2: %s\n", e), failures++;
+    shot(cv, "9-schedule-relative", [&](Adafruit_GFX &d) { render(d, tq, c); });
+  }
+
+  // 10-13. System screen: update available, installing, up to date, failed.
+  {
+    SystemInfo si;
+    si.build = 12;
+    si.version = "v0.4-12-g105a4f8";
+    si.availBuild = 15;
+    si.availFrom = "Coeno";
+    si.detail = "build 15 ready on Coeno";
+    si.checked = "checked 2:10 PM";
+    const char *k[] = {"ADDRESS", "", "MODE", "WI-FI", "COENO", "UPTIME"};
+    const char *v[] = {"planula-epaper-1.local", "10.0.0.87", "Coeno", "HomeNet  ·  -58 dBm",
+                       "connected · last page 12 s ago", "3 d 4 h"};
+    for (int i = 0; i < 6; i++) si.keys[i] = k[i], si.vals[i] = v[i];
+    si.nrows = 6;
+    Chrome sc;
+    PANEL_COPY(sc.clock, "2:20");
+    PANEL_COPY(sc.footerLeft, "Coeno · 10.0.0.228");
+    PANEL_COPY(sc.footerRight, "Wi-Fi -58 dBm · update ready");
+    si.state = SystemInfo::Available;
+    si.hint = "Press the button to update";
+    shot(cv, "10-system-update-available", [&](Adafruit_GFX &d) { renderSystem(d, si, sc); });
+    si.state = SystemInfo::Installing;
+    si.pct = 40;
+    shot(cv, "11-system-updating", [&](Adafruit_GFX &d) { renderSystem(d, si, sc); });
+    si.state = SystemInfo::UpToDate;
+    si.availBuild = 0;
+    si.detail = "up to date (build 12, Coeno)";
+    si.hint = "Press: close  ·  hold 3 s: check now";
+    PANEL_COPY(sc.footerRight, "Wi-Fi -58 dBm");
+    shot(cv, "12-system-up-to-date", [&](Adafruit_GFX &d) { renderSystem(d, si, sc); });
+    si.state = SystemInfo::Failed;
+    si.availBuild = 15;
+    si.detail = "update failed: SHA-256 mismatch";
+    si.checked = "still on build 12 · nothing changed";
+    si.hint = "Press: try again  ·  hold 3 s: re-check";
+    shot(cv, "13-system-failed", [&](Adafruit_GFX &d) { renderSystem(d, si, sc); });
+  }
+
   // 6. Setup screen.
   SetupInfo si;
   si.apName = "Planula-6D09";
@@ -224,6 +296,28 @@ static void tests() {
   Page q; q.n = 5; gridFor(q, c, r); CHECK(c == 3 && r == 2);
   q.n = 9; gridFor(q, c, r); CHECK(c == 0);
   q.n = 2; gridFor(q, c, r); CHECK(c == 2 && r == 1);
+
+  // Timeline lanes.
+  {
+    const char *js = R"({"layout":"timeline","window":"day","clock":600,"gauges":[
+      {"id":"l","kind":"level","pts":[[60,100],[-60,0],[0,50]]},
+      {"id":"s","kind":"step","pts":[[-60,0],[0,50],[60,100]]},
+      {"id":"o","spans":[[-30,30]]},
+      {"id":"e","kind":"dose","pts":[[-5,2.5],[5]]}]})";
+    Page t;
+    CHECK(!parsePage(js, strlen(js), t)[0]);
+    CHECK(t.layout == Layout::Timeline && t.n == 4);
+    CHECK(t.from == -600 && t.to == 840 && t.clock == 600);
+    CHECK(t.g[0].t[0] == -60 && t.g[0].t[2] == 60);  // sorted
+    CHECK(fabsf(laneValueAt(t.g[0], -30) - 25) < 1e-3);
+    CHECK(fabsf(laneValueAt(t.g[1], -30) - 0) < 1e-3);
+    CHECK(isnan(laneValueAt(t.g[0], -61)));
+    CHECK(t.g[2].lane == Lane::OnOff && t.g[2].nspark == 2 && laneValueAt(t.g[2], 0) == 1 && laneValueAt(t.g[2], 31) == 0);
+    CHECK(t.g[3].lane == Lane::Events && t.g[3].nspark == 2 && isnan(t.g[3].spark[1]));
+    CHECK(t.g[0].status == Status::Ok);
+    shiftTimeline(t, 30);
+    CHECK(t.clock == 630 && t.from == -630 && t.to == 810 && t.g[0].t[0] == -90);
+  }
 
   // SigV4: AWS's published S3 presigned-URL example.
   sigv4::Presign sp;

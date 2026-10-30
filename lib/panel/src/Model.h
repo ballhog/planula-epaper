@@ -12,12 +12,22 @@ constexpr int kMaxPages = 6;
 constexpr int kSparkLen = 48;
 
 enum class Status : uint8_t { Ok, Warn, Alarm, Stale, Missing };
-enum class Layout : uint8_t { Auto, Single, Grid2x2, Grid3x2, List };
+enum class Layout : uint8_t { Auto, Single, Grid2x2, Grid3x2, List, Timeline };
+
+// Timeline pages: each gauge is one lane, time runs left to right.
+//   Level  - a value that ramps between points (light intensity, pump speed %)
+//   Step   - a value that holds until the next point (setpoints, modes)
+//   OnOff  - on while the value is > 0.5 (outlets, ATO, feed mode)
+//   Events - one mark per point, value = amount (doser shots, feedings)
+// Points left of "now" (t <= 0) happened; points right of it are scheduled.
+enum class Lane : uint8_t { Level, Step, OnOff, Events };
 
 const char *statusName(Status s);
 Status statusFromName(const char *s);
 const char *layoutName(Layout l);
 Layout layoutFromName(const char *s);
+const char *laneName(Lane k);
+Lane laneFromName(const char *s);
 
 struct Gauge {
   char id[40] = "";      // stable key ("tank:ph", "apex:Tmp", ...)
@@ -34,6 +44,10 @@ struct Gauge {
   uint32_t age_s = 0;    // age of the value when the page was built
   uint8_t nspark = 0;    // sparkline points, oldest first
   float spark[kSparkLen];
+  // Timeline lanes only: spark[i] is the value at t[i] (minutes from the page's
+  // "now", negative = past), oldest first.
+  Lane lane = Lane::Level;
+  int16_t t[kSparkLen];
 };
 
 struct Page {
@@ -41,8 +55,24 @@ struct Page {
   Layout layout = Layout::Auto;
   uint8_t n = 0;
   Gauge g[kMaxGauges];
-  void clear() { title[0] = 0; layout = Layout::Auto; n = 0; }
+  // Timeline pages: the window in minutes around "now", and the local time of
+  // day at "now" (minutes after midnight, -1 = unknown: axis shows "-6 h").
+  int16_t from = -720, to = 720;
+  int16_t clock = -1;
+  bool day = false;  // window is today, midnight to midnight
+  bool h12 = true;   // 12-hour clock labels
+  void clear() {
+    title[0] = 0; layout = Layout::Auto; n = 0;
+    from = -720; to = 720; clock = -1; day = false;
+  }
 };
+
+// Timeline pages: move "now" on by `minutes` (the page got older on the panel).
+void shiftTimeline(Page &p, int minutes);
+// Sets from/to to midnight..midnight when p.day and the clock is known.
+void dayWindow(Page &p);
+// Value of a Level/Step/OnOff lane at time t (NAN outside its points).
+float laneValueAt(const Gauge &g, float t);
 
 // Everything around the gauges: header, footer, alarm banner.
 struct Chrome {

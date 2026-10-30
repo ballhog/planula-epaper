@@ -11,6 +11,18 @@
 // }
 //
 // value null/absent = no reading. lo/hi = the normal band (drawn on the sparkline).
+//
+// Timeline page ("layout": "timeline"): each gauge is a lane, times in minutes
+// from the page's "now" (negative = happened, positive = scheduled).
+//   page:  "from": -720, "to": 720      window (default ±12 h)
+//          "window": "day"              or midnight..midnight instead
+//          "clock": 521                 local minutes after midnight at "now" (axis in clock time)
+//   lane:  "kind": "level" | "step" | "onoff" | "events"
+//          "pts":   [[-600, 0], [-570, 80], ...]   [minutes, value], oldest first (up to 48)
+//          "spans": [[-90, -60], [240, 270]]       onoff shorthand: [on, off] pairs
+//          "pts" for events: [[-35, 2.5], [85, 2.5]]  value = amount (label), or [[-35]]
+//          "value"/"unit"/"dec"                    current value shown in the lane label
+//          "lo"/"hi"                               level/step scale (default 0..max, % = 0..100)
 // Coeno decides status; the panel only adds "stale" when the page itself goes old.
 #pragma once
 #include <stddef.h>

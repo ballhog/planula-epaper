@@ -70,6 +70,12 @@ bool flashAsked = false;
 volatile long availBuild = 0;
 SharedText updateText("not checked yet");
 volatile const char *updatingFrom = nullptr;  // set while a download runs: draw() shows it
+volatile int updatePct = -1;          // GitHub download progress (Coeno: ota_download_pct())
+volatile bool checking = false;       // a check is running on the worker
+volatile bool updateFailed = false;   // an install just failed: open the System screen
+volatile uint32_t checkedAtMs = 0;    // last finished check
+String availSource, availUrl, availSha;  // where the available build is (worker writes, then sets availBuild)
+size_t availSize = 0;
 volatile bool autoInstallReady = false;
 uint32_t lastCheck = 0;
 bool checkAsked = false, installAsked = false, rebootAsked = false, needsReboot = false;
@@ -92,13 +98,16 @@ int countPages() { return coenoMode() ? coeno::pageCount() : direct::pageCount()
 
 // Fill page i with fresh data (Coeno: received page + local staleness).
 bool fetchPage(int i, panel::Page &p) {
+  p.h12 = !settings::get().clock24;
   if (!coenoMode()) {
     direct::build(i, p);
     return true;
   }
   uint32_t at;
   if (!coeno::getPage(i, p, at)) return false;
+  p.h12 = !settings::get().clock24;
   uint32_t pageAge = (millis() - at) / 1000;
+  panel::shiftTimeline(p, pageAge / 60);  // "now" moves on between Coeno's pages
   uint16_t staleAfter = settings::get().stale_s;
   for (int k = 0; k < p.n; k++) {
     panel::Gauge &g = p.g[k];
@@ -110,7 +119,7 @@ bool fetchPage(int i, panel::Page &p) {
 
 void collectAlarms() {
   std::vector<Alarm> now;
-  std::unique_ptr<panel::Page> pp(new (std::nothrow) panel::Page());  // 3.4 kB: not on the loop stack
+  std::unique_ptr<panel::Page> pp(new (std::nothrow) panel::Page());  // ~4.4 kB: not on the loop stack
   if (!pp) return;
   panel::Page &p = *pp;
   for (int i = 0; i < nPages; i++) {
@@ -184,7 +193,7 @@ void fillChrome(panel::Chrome &c) {
   }
   if (net::online()) right = "Wi-Fi " + String(net::rssi()) + " dBm";
   else right = "Wi-Fi offline";
-  if (availBuild > 0) right += " · update ready";
+  if (availBuild > 0) right += " · update ready, hold 3 s";
   PANEL_COPY(c.footerLeft, left.c_str());
   PANEL_COPY(c.footerRight, right.c_str());
   c.footerAlert = alert;
@@ -195,15 +204,76 @@ display::Scene message(const String &title, const String &body, const String &bi
   return [title, body, big, c](Adafruit_GFX &d) { panel::renderMessage(d, title.c_str(), body.c_str(), big.c_str(), c); };
 }
 
-display::Scene drawInfo(panel::Chrome &c) {
+// System screen (button held 3 s, an install running, or one that just failed):
+// firmware update state on the left, panel details on the right.
+display::Scene drawSystem(panel::Chrome &c) {
   const Settings &s = settings::get();
-  String body = "Settings:  http://" + s.name + ".local  or  http://" + net::ip() + "\n";
-  body += "Mode: " + s.mode + "   ·   " + net::statusText() + "\n";
-  body += "Coeno: " + coeno::status() + "\n";
-  if (s.apexOn) body += "Apex: " + apex::status() + "\n";
-  if (s.hydrosOn) body += "Hydros: " + hydros::status() + "\n";
-  body += "Build " + String(FW_BUILD) + " (" FW_VERSION ")";
-  return message(s.name, body, net::ip(), c);
+  struct Text {  // owns the strings the SystemInfo points at
+    String version, from, detail, checked, hint, rows[8][2];
+  };
+  auto t = std::make_shared<Text>();
+  auto si = std::make_shared<panel::SystemInfo>();
+  long avail = availBuild;
+  String detail = updateText.get();
+  si->build = FW_BUILD;
+  si->availBuild = avail;
+  t->version = FW_VERSION;
+  t->from = availSource == "github" ? "GitHub" : "Coeno";
+  if (const char *from = (const char *)updatingFrom) {
+    si->state = panel::SystemInfo::Installing;
+    t->from = from;
+    int pct = !strcmp(from, "GitHub") ? updatePct : ota_download_pct();
+    si->pct = pct;
+  } else if (checking) {
+    si->state = panel::SystemInfo::Checking;
+  } else if (detail.startsWith("update failed")) {
+    si->state = panel::SystemInfo::Failed;
+    t->checked = "still on build " + String(FW_BUILD) + " · nothing changed";
+    t->hint = avail > 0 ? "Press: try again  ·  hold 3 s: re-check" : "Press: close  ·  hold 3 s: check again";
+  } else if (avail > 0) {
+    si->state = panel::SystemInfo::Available;
+    t->hint = "Press the button to update";
+  } else if (detail.startsWith("up to date")) {
+    si->state = panel::SystemInfo::UpToDate;
+  }
+  t->detail = si->state == panel::SystemInfo::Checking ? String("asking Coeno") + (s.githubUpdates ? " / GitHub" : "") : detail;
+  if (!t->checked.length() && checkedAtMs) {
+    char a[16];
+    panel::formatAge((millis() - checkedAtMs) / 1000, a, sizeof a);
+    t->checked = String("checked ") + (strcmp(a, "now") ? String(a) + " ago" : String("just now"));
+  }
+  if (!t->hint.length()) t->hint = "Press: close  ·  hold 3 s: check now";
+  if (s.autoUpdate && si->state == panel::SystemInfo::Available) t->hint = "Installs by itself (auto) · or press";
+
+  uint32_t up = millis() / 1000;
+  char upt[24];
+  if (up >= 86400) snprintf(upt, sizeof upt, "%u d %u h", (unsigned)(up / 86400), (unsigned)(up % 86400 / 3600));
+  else snprintf(upt, sizeof upt, "%u h %u min", (unsigned)(up / 3600), (unsigned)(up % 3600 / 60));
+  int n = 0;
+  auto row = [&](const String &k, const String &v) {
+    if (n < 8) { t->rows[n][0] = k; t->rows[n][1] = v; n++; }
+  };
+  row("ADDRESS", s.name + ".local");
+  row("", net::ip());
+  row("MODE", coenoMode() ? "Coeno" : "Direct");
+  row("WI-FI", net::statusText());
+  if (coenoMode()) row("COENO", coeno::status());
+  else {
+    if (s.apexOn) row("APEX", apex::status());
+    if (s.hydrosOn) row("HYDROS", hydros::status());
+  }
+  row("UPTIME", upt);
+  for (int i = 0; i < n; i++) {
+    si->keys[i] = t->rows[i][0].c_str();
+    si->vals[i] = t->rows[i][1].c_str();
+  }
+  si->nrows = n;
+  si->version = t->version.c_str();
+  si->availFrom = t->from.c_str();
+  si->detail = t->detail.c_str();
+  si->checked = t->checked.c_str();
+  si->hint = t->hint.c_str();
+  return [t, si, c](Adafruit_GFX &d) { panel::renderSystem(d, *si, c); };
 }
 
 // What kind of screen is up ("setup", "info", "page:2", ...). Partial refreshes
@@ -220,10 +290,8 @@ void draw() {
   const Settings &s = settings::get();
   display::Scene scene;
 
-  if (const char *from = (const char *)updatingFrom) {
-    scene = message("Updating firmware",
-                    String("Downloading from ") + from + ". Don't unplug the panel.\nIt restarts by itself when done.",
-                    "", c);
+  if (updatingFrom) {
+    scene = drawSystem(c);
     screen = "updating";
   } else if (net::state() == net::State::SetupAp && !net::online()) {
     String ap = net::apName(), pass = s.apPass, url = "http://192.168.4.1", why = net::setupReason();
@@ -241,7 +309,7 @@ void draw() {
     };
     screen = "setup";
   } else if (millis() < infoUntil) {
-    scene = drawInfo(c);
+    scene = drawSystem(c);
     screen = "info";
   } else if (!net::online()) {
     scene = message("Joining Wi-Fi",
@@ -351,10 +419,21 @@ void button() {
       net::openSetup("Setup network opened with the button.");
       app::redraw(false);
     } else if (held >= 3000) {
-      infoUntil = now + 60000;
+      // Opens the System screen; held again while it's up = check for updates now.
+      if (infoUntil && now < infoUntil) app::checkUpdateSoon();
+      infoUntil = now + 120000;
       app::redraw(false);
     } else if (held >= 40) {
-      if (!alarms.empty() && !acked) app::ackAlarm();
+      if (infoUntil && now < infoUntil) {
+        // System screen: press = install when there's one (or retry), else close.
+        if (availBuild > 0) {
+          app::installUpdateSoon();
+          infoUntil = now + 120000;
+        } else {
+          infoUntil = 0;
+        }
+        app::redraw(false);
+      } else if (!alarms.empty() && !acked) app::ackAlarm();
       else app::nextPage();
     }
   }
@@ -404,11 +483,10 @@ const char *kGithubManifest = "https://github.com/ballhog/planula-epaper/release
 #else
 const char *kGithubManifest = "https://github.com/ballhog/planula-epaper/releases/latest/download/latest.json";
 #endif
-String availSource, availUrl, availSha;
-size_t availSize = 0;
 
 // Called on the worker: the loop draws the notice (only it touches the display).
 void showUpdating(const char *from) {
+  updatePct = -1;
   updatingFrom = from;
   redrawAsked = true;
   delay(3000);  // let the notice reach the screen before the download takes the CPU
@@ -460,9 +538,10 @@ void checkUpdates() {
 void installUpdate() {
   if (availSource == "github") {
     showUpdating("GitHub");
-    String e = https::downloadFirmware(availUrl, availSha, availSize, nullptr);
+    String e = https::downloadFirmware(availUrl, availSha, availSize, [](int pct) { updatePct = pct; });
     if (e.length()) {
       updatingFrom = nullptr;
+      updateFailed = true;
       updateText.set("update failed: " + e);
       app::redraw(false);
       return;
@@ -477,13 +556,18 @@ void installUpdate() {
   showUpdating("Coeno");
   if (!ota_check_and_apply(url.c_str(), nullptr)) {
     updatingFrom = nullptr;
+    updateFailed = true;
     updateText.set(String("update failed: ") + ota_last_reason());
     app::redraw(false);
   }
 }
 
 void checkJob() {
+  checking = true;
+  redrawAsked = true;  // System screen: "Checking…"
   checkUpdates();
+  checking = false;
+  checkedAtMs = millis();
   Serial.printf("[update] %s (8-bit largest %u)\n", updateText.get().c_str(),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   if (availBuild > 0 && settings::get().autoUpdate) autoInstallReady = true;
@@ -491,7 +575,12 @@ void checkJob() {
 }
 
 void installJob() {
-  if (availBuild <= 0) checkUpdates();
+  if (availBuild <= 0) {
+    checking = true;
+    checkUpdates();
+    checking = false;
+    checkedAtMs = millis();
+  }
   if (availBuild > 0) installUpdate();  // restarts on success
   else app::redraw(false);
 }
@@ -619,6 +708,23 @@ void loop() {
   if (infoUntil && now > infoUntil) {
     infoUntil = 0;
     redrawAsked = true;
+  }
+  if (updateFailed) {  // show what went wrong for 2 min
+    updateFailed = false;
+    infoUntil = now + 120000;
+    redrawAsked = true;
+  }
+  // Download progress on the System screen: a partial refresh every 10 %.
+  static int lastPctStep = -2;
+  if (const char *from = (const char *)updatingFrom) {
+    int pct = !strcmp(from, "GitHub") ? updatePct : ota_download_pct();
+    int stepNow = pct < 0 ? -1 : pct / 10;
+    if (stepNow != lastPctStep) {
+      lastPctStep = stepNow;
+      redrawAsked = true;
+    }
+  } else {
+    lastPctStep = -2;
   }
 
   // Redraw on request, or once a minute (clock + fresh values). The frame hash

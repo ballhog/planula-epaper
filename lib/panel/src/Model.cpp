@@ -30,6 +30,7 @@ const char *layoutName(Layout l) {
     case Layout::Grid2x2: return "2x2";
     case Layout::Grid3x2: return "3x2";
     case Layout::List: return "list";
+    case Layout::Timeline: return "timeline";
     default: return "auto";
   }
 }
@@ -40,7 +41,55 @@ Layout layoutFromName(const char *s) {
   if (!strcmp(s, "2x2")) return Layout::Grid2x2;
   if (!strcmp(s, "3x2")) return Layout::Grid3x2;
   if (!strcmp(s, "list")) return Layout::List;
+  if (!strcmp(s, "timeline") || !strcmp(s, "schedule")) return Layout::Timeline;
   return Layout::Auto;
+}
+
+const char *laneName(Lane k) {
+  switch (k) {
+    case Lane::Step: return "step";
+    case Lane::OnOff: return "onoff";
+    case Lane::Events: return "events";
+    default: return "level";
+  }
+}
+
+Lane laneFromName(const char *s) {
+  if (!s) return Lane::Level;
+  if (!strcmp(s, "step")) return Lane::Step;
+  if (!strcmp(s, "onoff") || !strcmp(s, "outlet") || !strcmp(s, "switch")) return Lane::OnOff;
+  if (!strcmp(s, "events") || !strcmp(s, "dose") || !strcmp(s, "doses")) return Lane::Events;
+  return Lane::Level;
+}
+
+void dayWindow(Page &p) {
+  if (!p.day || p.clock < 0) return;
+  p.from = -p.clock;
+  p.to = 1440 - p.clock;
+}
+
+void shiftTimeline(Page &p, int minutes) {
+  if (minutes <= 0 || p.layout != Layout::Timeline) return;
+  for (int i = 0; i < p.n; i++) {
+    Gauge &g = p.g[i];
+    for (int k = 0; k < g.nspark; k++) g.t[k] = (int16_t)(g.t[k] - minutes);
+  }
+  if (p.clock >= 0) p.clock = (int16_t)((p.clock + minutes) % 1440);
+  dayWindow(p);
+}
+
+float laneValueAt(const Gauge &g, float t) {
+  int n = g.nspark;
+  if (n == 0 || t < g.t[0]) return NAN;
+  if (t >= g.t[n - 1]) return g.spark[n - 1];  // holds after the last point
+  for (int i = 0; i + 1 < n; i++) {
+    if (t < g.t[i + 1]) {
+      if (g.lane != Lane::Level || g.t[i + 1] == g.t[i]) return g.spark[i];
+      float f = (t - g.t[i]) / (float)(g.t[i + 1] - g.t[i]);
+      return g.spark[i] + f * (g.spark[i + 1] - g.spark[i]);
+    }
+  }
+  return g.spark[n - 1];
 }
 
 void formatAge(uint32_t s, char *out, size_t n) {
