@@ -31,7 +31,7 @@ Coeno is still used in direct mode when a host is set: firmware updates, panel s
 | Press | Does |
 |---|---|
 | short | acknowledge the alarm, or next page. On the System screen: install the update (or retry it), else close |
-| hold 3 s | **System** screen (firmware + update state, address, sources). Held again while it's up: check for updates now |
+| hold 3 s | **System** screen (firmware + update state, address, sources). Held again while it's up: check for updates now. Without Coeno linked: info screen only (address, sources, build) |
 | hold 10 s | open the setup Wi-Fi network |
 | hold 25 s | erase all settings |
 
@@ -58,7 +58,7 @@ Passwords are stored on the panel (NVS) and never sent back to the browser.
 
 ### Schedule (timeline) pages
 
-`"layout": "timeline"`: each gauge is a lane, time runs across, a black line marks now. What already happened is drawn solid (hatched under a ramp, filled bars, filled dots); what is scheduled is drawn hollow. Up to 10 lanes and 48 points per lane.
+**Coeno mode only** (Coeno builds the lanes; a direct-mode page set to timeline falls back to auto). `"layout": "timeline"`: each gauge is a lane, time runs across, a black line marks now. What already happened is drawn solid (hatched under a ramp, filled bars, filled dots); what is scheduled is drawn hollow. Up to 10 lanes and 48 points per lane.
 
 | Lane `kind` | For | Drawn as | Label cell says |
 |---|---|---|---|
@@ -84,7 +84,7 @@ Times are minutes from the page's now (negative = happened). `pts` are `[minutes
 
 ### System screen and updates
 
-Hold the button 3 s. The left card shows the update state; the right column shows the address, mode, Wi-Fi and source status. When a newer build is on Coeno or GitHub the card turns black and **pressing the button installs it**; a progress bar follows (partial refresh every 10 %), then the panel restarts into the new build (rolls back by itself if it doesn't come up). A failed install opens this screen for 2 min with the reason; the footer says `update ready, hold 3 s` whenever one is waiting.
+**Only when Coeno is linked for updates** (Coeno host set and *Coeno updates* on, in either mode); otherwise the 3 s hold shows the plain info screen and the panel offers no updates on screen (the settings page still can). Hold the button 3 s. The left card shows the update state; the right column shows the address, mode, Wi-Fi and source status. When a newer build is on Coeno or GitHub the card turns black and **pressing the button installs it**; a progress bar follows (partial refresh every 10 %), then the panel restarts into the new build (rolls back by itself if it doesn't come up). A failed install opens this screen for 2 min with the reason; the footer says `update ready, hold 3 s` whenever one is waiting.
 
 ![Update available](docs/screens/10-system-update.png)
 

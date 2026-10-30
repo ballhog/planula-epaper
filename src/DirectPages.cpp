@@ -21,6 +21,8 @@ void build(int i, panel::Page &p) {
   if (i < (int)s.pages.size()) {
     PANEL_COPY(p.title, s.pages[i].title.c_str());
     p.layout = panel::layoutFromName(s.pages[i].layout.c_str());
+    // Schedule (timeline) pages need Coeno to build the lanes.
+    if (p.layout == panel::Layout::Timeline) p.layout = panel::Layout::Auto;
   } else {
     snprintf(p.title, sizeof p.title, "Page %d", i + 1);
   }

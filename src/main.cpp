@@ -93,6 +93,12 @@ String clockText() {
 }
 
 bool coenoMode() { return settings::get().mode == "coeno"; }
+// Coeno is linked for firmware (either mode): only then does the panel offer
+// updates on screen (System screen, "update ready" prompt, press to install).
+bool coenoLinked() {
+  const Settings &s = settings::get();
+  return s.coenoUpdates && s.coenoHost.length();
+}
 
 int countPages() { return coenoMode() ? coeno::pageCount() : direct::pageCount(); }
 
@@ -193,7 +199,7 @@ void fillChrome(panel::Chrome &c) {
   }
   if (net::online()) right = "Wi-Fi " + String(net::rssi()) + " dBm";
   else right = "Wi-Fi offline";
-  if (availBuild > 0) right += " · update ready, hold 3 s";
+  if (availBuild > 0 && coenoLinked()) right += " · update ready, hold 3 s";
   PANEL_COPY(c.footerLeft, left.c_str());
   PANEL_COPY(c.footerRight, right.c_str());
   c.footerAlert = alert;
@@ -204,7 +210,18 @@ display::Scene message(const String &title, const String &body, const String &bi
   return [title, body, big, c](Adafruit_GFX &d) { panel::renderMessage(d, title.c_str(), body.c_str(), big.c_str(), c); };
 }
 
-// System screen (button held 3 s, an install running, or one that just failed):
+// Info screen without Coeno: address and source status only, no update offers.
+display::Scene drawInfo(panel::Chrome &c) {
+  const Settings &s = settings::get();
+  String body = "Settings:  http://" + s.name + ".local  or  http://" + net::ip() + "\n";
+  body += "Mode: " + s.mode + "   ·   " + net::statusText() + "\n";
+  if (s.apexOn) body += "Apex: " + apex::status() + "\n";
+  if (s.hydrosOn) body += "Hydros: " + hydros::status() + "\n";
+  body += "Build " + String(FW_BUILD) + " (" FW_VERSION ")";
+  return message(s.name, body, net::ip(), c);
+}
+
+// System screen, Coeno linked (button held 3 s, an install running, or one that just failed):
 // firmware update state on the left, panel details on the right.
 display::Scene drawSystem(panel::Chrome &c) {
   const Settings &s = settings::get();
@@ -290,8 +307,12 @@ void draw() {
   const Settings &s = settings::get();
   display::Scene scene;
 
-  if (updatingFrom) {
-    scene = drawSystem(c);
+  if (const char *from = (const char *)updatingFrom) {
+    if (coenoLinked()) scene = drawSystem(c);
+    else
+      scene = message("Updating firmware",
+                      String("Downloading from ") + from + ". Don't unplug the panel.\nIt restarts by itself when done.",
+                      "", c);
     screen = "updating";
   } else if (net::state() == net::State::SetupAp && !net::online()) {
     String ap = net::apName(), pass = s.apPass, url = "http://192.168.4.1", why = net::setupReason();
@@ -309,7 +330,7 @@ void draw() {
     };
     screen = "setup";
   } else if (millis() < infoUntil) {
-    scene = drawSystem(c);
+    scene = coenoLinked() ? drawSystem(c) : drawInfo(c);
     screen = "info";
   } else if (!net::online()) {
     scene = message("Joining Wi-Fi",
@@ -420,13 +441,13 @@ void button() {
       app::redraw(false);
     } else if (held >= 3000) {
       // Opens the System screen; held again while it's up = check for updates now.
-      if (infoUntil && now < infoUntil) app::checkUpdateSoon();
+      if (infoUntil && now < infoUntil && coenoLinked()) app::checkUpdateSoon();
       infoUntil = now + 120000;
       app::redraw(false);
     } else if (held >= 40) {
       if (infoUntil && now < infoUntil) {
         // System screen: press = install when there's one (or retry), else close.
-        if (availBuild > 0) {
+        if (availBuild > 0 && coenoLinked()) {
           app::installUpdateSoon();
           infoUntil = now + 120000;
         } else {
@@ -711,7 +732,7 @@ void loop() {
   }
   if (updateFailed) {  // show what went wrong for 2 min
     updateFailed = false;
-    infoUntil = now + 120000;
+    if (coenoLinked()) infoUntil = now + 120000;
     redrawAsked = true;
   }
   // Download progress on the System screen: a partial refresh every 10 %.
