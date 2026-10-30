@@ -8,6 +8,11 @@
 //   panel_node/<name>/hello      retained {online, type, build, ip, ...}; LWT {online:false}
 //   panel_node/<name>/state      retained every 60 s and on change: page shown, alarm, rssi, mode
 //   panel_node/<name>/ack        {"ids": [...]} when the alarm is acknowledged at the panel
+//   panel_node/<name>/describe   retained, on connect: Coeno's device standard (who it is,
+//                                what Coeno may do); hello carries describe_rev
+//   panel_node/<name>/event      answers to set/do: {"kind", "path", "ok", "why"?}
+// Coeno → panel, device standard: set/screen/page {"value": n},
+//   do/screen/<next|refresh|identify|ack|check_update>
 #pragma once
 #include <Arduino.h>
 

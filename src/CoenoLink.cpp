@@ -65,10 +65,58 @@ String hello(bool online) {
     d["mode"] = settings::get().mode;
     d["width"] = 800;
     d["height"] = 480;
+    d["describe_rev"] = "b" + String(FW_BUILD);   // the description only changes with the firmware
   }
   String s;
   serializeJson(d, s);
   return s;
+}
+
+// Coeno's device standard (protocol/devices.py in Coeno): who this panel is and
+// what Coeno may do with it. Same shape as Coeno's adapter for older builds.
+String describe() {
+  JsonDocument doc;
+  doc["standard"] = 1;
+  JsonObject d = doc["device"].to<JsonObject>();
+  d["serial"] = settings::get().name;
+  d["model"] = "planula-epaper";
+  d["source"] = "planula";
+  d["name"] = settings::get().name;
+  d["hw_rev"] = NODE_BOARD;
+  d["mac"] = WiFi.macAddress();
+  JsonObject fw = d["firmware"].to<JsonObject>();
+  fw["build"] = FW_BUILD;
+  fw["version"] = FW_VERSION;
+  fw["repo"] = "ballhog/planula-epaper";
+  d["page"] = "/";
+  d["schedule"] = nullptr;
+  JsonObject n = doc["nodes"]["screen"].to<JsonObject>();
+  n["name"] = "Screen";
+  JsonObject pr = n["properties"].to<JsonObject>();
+  JsonObject p = pr["page"].to<JsonObject>();
+  p["role"] = "setting"; p["name"] = "Page shown"; p["datatype"] = "integer";
+  p["min"] = 0; p["max"] = panel::kMaxPages - 1; p["settable"] = true; p["key"] = "page";
+  p = pr["pages"].to<JsonObject>();
+  p["role"] = "status"; p["name"] = "Pages"; p["datatype"] = "integer"; p["key"] = "pages";
+  p = pr["rssi"].to<JsonObject>();
+  p["role"] = "status"; p["name"] = "WiFi signal"; p["datatype"] = "integer"; p["unit"] = "dBm"; p["key"] = "rssi";
+  JsonObject ac = n["actions"].to<JsonObject>();
+  for (const char *a : {"next", "refresh", "identify", "ack", "check_update"}) ac[a].to<JsonObject>();
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+void standardEvent(const char *kind, const String &path, const char *why) {
+  if (!client) return;
+  JsonDocument d;
+  d["kind"] = kind;
+  d["path"] = path;
+  d["ok"] = why == nullptr;
+  if (why) d["why"] = why;
+  String s;
+  serializeJson(d, s);
+  esp_mqtt_client_publish(client, (prefix + "event").c_str(), s.c_str(), s.length(), 1, 0);
 }
 
 void handle(const String &topic, const char *data, size_t len) {
@@ -96,6 +144,34 @@ void handle(const String &topic, const char *data, size_t len) {
   } else if (leaf.startsWith("cmd/")) {
     Lock l;
     if (pending.size() < 8) pending.push_back({leaf.substring(4), String(data, len)});
+  } else if (leaf.startsWith("set/") || leaf.startsWith("do/")) {
+    // Device standard: set/screen/page {"value": n}; do/screen/<next|refresh|identify|ack|check_update>.
+    bool isSet = leaf.startsWith("set/");
+    String path = leaf.substring(isSet ? 4 : 3);
+    String cmd, body = "{}";
+    if (isSet && path == "screen/page") {
+      JsonDocument d;
+      if (deserializeJson(d, data, len) || !d["value"].is<int>()) { standardEvent("set", path, "send {\"value\": n}"); return; }
+      int n = d["value"];
+      if (n < 0 || n >= panel::kMaxPages) { standardEvent("set", path, "no such page"); return; }
+      cmd = "page";
+      body = "{\"n\":" + String(n) + "}";
+    } else if (!isSet && path.startsWith("screen/")) {
+      cmd = path.substring(7);
+      if (cmd == "check_update") cmd = "check";
+      if (cmd != "next" && cmd != "refresh" && cmd != "identify" && cmd != "ack" && cmd != "check") {
+        standardEvent("do", path, "no such action");
+        return;
+      }
+    } else {
+      standardEvent(isSet ? "set" : "do", path, isSet ? "not settable over MQTT" : "no such action");
+      return;
+    }
+    {
+      Lock l;
+      if (pending.size() < 8) pending.push_back({cmd, body});
+    }
+    standardEvent(isSet ? "set" : "do", path, nullptr);
   }
 }
 
@@ -105,8 +181,12 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
     case MQTT_EVENT_CONNECTED: {
       isConnected = true;
       Serial.printf("[coeno] connected to %s\n", uri.c_str());
+      String dsc = describe();   // before hello: hello says the description is there
+      esp_mqtt_client_publish(e->client, (prefix + "describe").c_str(), dsc.c_str(), dsc.length(), 1, 1);
       String h = hello(true);
       esp_mqtt_client_publish(e->client, (prefix + "hello").c_str(), h.c_str(), h.length(), 1, 1);
+      esp_mqtt_client_subscribe(e->client, (prefix + "set/#").c_str(), 1);
+      esp_mqtt_client_subscribe(e->client, (prefix + "do/#").c_str(), 1);
       esp_mqtt_client_subscribe(e->client, (prefix + "page/+").c_str(), 1);
       esp_mqtt_client_subscribe(e->client, (prefix + "config").c_str(), 1);
       esp_mqtt_client_subscribe(e->client, (prefix + "cmd/#").c_str(), 1);
