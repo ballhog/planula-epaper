@@ -84,6 +84,8 @@ th{font-size:12px;color:var(--muted);font-weight:500}
   <p class="hint">Used for pages in Coeno mode, and for firmware updates and remote control in both modes.</p>
   <div class="row"><div><label>Coeno address</label><input id="coenoHost" placeholder="10.0.0.228"></div>
   <div><label>MQTT port</label><input id="coenoPort" type="number"></div></div>
+  <div class="row"><div><label>Broker user</label><input id="coenoUser" autocomplete="off" placeholder="from Coeno, when adopted"></div>
+  <div><label>Broker password</label><input id="coenoPass" type="password" autocomplete="new-password"></div></div>
   <label><input type="checkbox" id="coenoUpdates"> Check Coeno for firmware updates</label>
  </div>
  <div class="card"><h2>Neptune Apex</h2>
@@ -195,7 +197,7 @@ async function refresh(){
 async function loadSettings(){
  C=await get('/api/settings');
  document.querySelectorAll('input[name=mode]').forEach(r=>r.checked=r.value===C.mode);
- $('coenoHost').value=C.coeno.host;$('coenoPort').value=C.coeno.port;$('coenoUpdates').checked=C.coeno.updates;
+ $('coenoHost').value=C.coeno.host;$('coenoPort').value=C.coeno.port;$('coenoUser').value=C.coeno.user||'';$('coenoPass').value='';$('coenoPass').placeholder=C.coeno.pass&&C.coeno.pass.set?'saved — leave blank to keep':'';$('coenoUpdates').checked=C.coeno.updates;
  $('apexOn').checked=C.apex.on;$('apexHost').value=C.apex.host;$('apexUser').value=C.apex.user;$('apexPass').value='';
  $('apexPass').placeholder=C.apex.pass.set?'saved — leave blank to keep':'';$('apexPoll').value=C.apex.poll_s;$('apexUnit').value=C.apex.temp_unit;
  $('hydrosOn').checked=C.hydros.on;$('hydrosUser').value=C.hydros.user;$('hydrosPass').value='';
@@ -227,10 +229,10 @@ function addWifi(){const ssid=$('newSsid').value.trim();if(!ssid)return toast('E
 
 // ── data source
 function saveData(){const mode=(document.querySelector('input[name=mode]:checked')||{}).value||'coeno';
- const b={mode,coeno:{host:$('coenoHost').value.trim(),port:+$('coenoPort').value||1883,updates:$('coenoUpdates').checked},
+ const b={mode,coeno:{host:$('coenoHost').value.trim(),port:+$('coenoPort').value||1883,user:$('coenoUser').value.trim(),updates:$('coenoUpdates').checked},
   apex:{on:$('apexOn').checked,host:$('apexHost').value.trim(),user:$('apexUser').value.trim(),poll_s:+$('apexPoll').value||60,temp_unit:$('apexUnit').value},
   hydros:{on:$('hydrosOn').checked,user:$('hydrosUser').value.trim()}};
- if($('apexPass').value)b.apex.pass=$('apexPass').value;if($('hydrosPass').value)b.hydros.pass=$('hydrosPass').value;save(b);}
+ if($('coenoPass').value)b.coeno.pass=$('coenoPass').value;if($('apexPass').value)b.apex.pass=$('apexPass').value;if($('hydrosPass').value)b.hydros.pass=$('hydrosPass').value;save(b);}
 // Tests run in the background on the panel; ask until they finish.
 async function runTest(what,body,el,busy){const r=$(el);r.className='result';r.textContent=busy;
  try{let j=await post('/api/test/'+what,body);const t0=Date.now();

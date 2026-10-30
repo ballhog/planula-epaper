@@ -37,6 +37,7 @@ struct Settings {
 
   String coenoHost = "10.0.0.228";
   uint16_t coenoPort = 1883;
+  String coenoUser, coenoPass;  // broker login (Coeno issues it when the panel is adopted)
   bool coenoUpdates = true;  // check Coeno for firmware
   bool githubUpdates = true; // no Coeno answering: check GitHub releases instead
   bool autoUpdate = false;   // install a newer build by itself (else: Install button / Coeno)

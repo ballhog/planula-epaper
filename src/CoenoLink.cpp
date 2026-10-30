@@ -250,9 +250,16 @@ void start() {
   uri = "mqtt://" + s.coenoHost + ":" + String(s.coenoPort);
   lwt = hello(false);
   clientId = s.name;
+  static String user, pass;  // must outlive the client config
+  user = s.coenoUser;
+  pass = s.coenoPass;
   esp_mqtt_client_config_t cfg = {};
   cfg.broker.address.uri = uri.c_str();
   cfg.credentials.client_id = clientId.c_str();
+  if (user.length()) {  // Coeno's broker login for this panel (device standard: adoption)
+    cfg.credentials.username = user.c_str();
+    cfg.credentials.authentication.password = pass.c_str();
+  }
   cfg.session.keepalive = 30;
   cfg.session.last_will.topic = nullptr;
   static String lwtTopic;

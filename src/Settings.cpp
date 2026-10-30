@@ -52,6 +52,8 @@ void toJson(JsonObject o, bool with) {
   JsonObject c = o["coeno"].to<JsonObject>();
   c["host"] = s.coenoHost;
   c["port"] = s.coenoPort;
+  c["user"] = s.coenoUser;
+  secret(c, "pass", s.coenoPass, with);
   c["updates"] = s.coenoUpdates;
   JsonObject u = o["updates"].to<JsonObject>();
   u["github"] = s.githubUpdates;
@@ -136,6 +138,8 @@ String applyJson(JsonObjectConst o) {
     JsonObjectConst c = o["coeno"];
     if (c["host"].is<const char *>()) s.coenoHost = c["host"].as<const char *>();
     if (c["port"].is<int>()) s.coenoPort = c["port"];
+    if (c["user"].is<const char *>()) s.coenoUser = c["user"].as<const char *>();
+    applySecret(c["pass"], s.coenoPass);
     if (c["updates"].is<bool>()) s.coenoUpdates = c["updates"];
   }
   if (o["updates"].is<JsonObjectConst>()) {

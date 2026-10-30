@@ -154,7 +154,9 @@ void handlePostSettings() {
   for (size_t i = 0; !wifiChanged && i < s.wifi.size(); i++)
     wifiChanged = before.wifi[i].ssid != s.wifi[i].ssid || before.wifi[i].pass != s.wifi[i].pass;
   if (wifiChanged) net::reconnect();
-  if (before.coenoHost != s.coenoHost || before.coenoPort != s.coenoPort || before.name != s.name) coeno::restart();
+  if (before.coenoHost != s.coenoHost || before.coenoPort != s.coenoPort || before.name != s.name ||
+      before.coenoUser != s.coenoUser || before.coenoPass != s.coenoPass)
+    coeno::restart();
   if (before.name != s.name) app::setRebootNeeded();  // mDNS name
   if (before.panelDriver != s.panelDriver) app::setRebootNeeded();
   if (before.hydrosUser != s.hydrosUser || before.hydrosPass != s.hydrosPass || before.hydrosOn != s.hydrosOn ||
