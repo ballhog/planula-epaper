@@ -6,7 +6,7 @@
 //   panel_node/<name>/cmd/<what> next | page {n} | refresh | identify | update | check | ack
 // Panel → Coeno:
 //   panel_node/<name>/hello      retained {online, type, build, ip, ...}; LWT {online:false}
-//   panel_node/<name>/state      retained every 60 s and on change: page shown, alarm, rssi, mode
+//   panel_node/<name>/state      retained on connect, on change and every 60 s: page shown, alarm, rssi, mode
 //   panel_node/<name>/ack        {"ids": [...]} when the alarm is acknowledged at the panel
 //   panel_node/<name>/describe   retained, on connect: Coeno's device standard (who it is,
 //                                what Coeno may do); hello carries describe_rev

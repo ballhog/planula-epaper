@@ -14,6 +14,7 @@ The Corallite wall gauge panel: a 7.5" black/white e-paper that shows any value 
 | **Direct** | The panel reads the **Apex** (local REST, Basic auth) and/or the **Hydros** (CoralVue cloud) itself. You pick gauges, pages and limits on the panel's own settings page. | Apex login and/or Hydros app login |
 
 Coeno is still used in direct mode when a host is set: firmware updates, panel status and remote commands.
+The Coeno address starts **blank**: a new panel is standalone (screen says so, no connection attempts, updates from GitHub) until you set it. Panels that already had one keep it.
 
 ## First boot
 
@@ -22,7 +23,7 @@ Coeno is still used in direct mode when a host is set: firmware updates, panel s
    - **Switch 2 → ON** (USB serial chip powered; needed to flash).
 2. Flash it: `pio run -t upload` (the build pulls the toolchain and libraries itself).
 3. With no Wi-Fi saved, the screen shows a QR code and **Planula-XXXX** with its password. Join it; your phone opens the settings page (or go to http://192.168.4.1).
-4. Add your Wi-Fi, pick **Coeno** or **Direct**, and save. Once the panel joins your network, the settings page is at **http://planula-epaper-1.local** (or its IP; hold BOOT 3 s to show it on screen).
+4. Add your Wi-Fi, pick **Coeno** or **Direct**, and save. The settings login is user **admin** with the same password as the setup network (no prompt while you're on the setup network itself). Once the panel joins your network, the settings page is at **http://planula-epaper-1.local** (or its IP; hold BOOT 3 s to show it on screen).
 
 ![Setup screen](docs/screens/6-setup.png)
 
@@ -42,9 +43,9 @@ Coeno is still used in direct mode when a host is set: firmware updates, panel s
 - **Data source**: mode, Coeno address, **Apex** (address, user, password, poll interval, °F/°C, *Test login*), **Hydros** (e-mail, password, *Test login*).
 - **Gauges** (direct mode): up to 6 pages (title, layout) and 40 gauges. Pick from every reading the Apex/Hydros reported, then set the label, unit, decimals, normal band and alarm limits. Picking pH/temp/salinity/ORP/alk/Ca/Mg fills in typical reef limits.
 - **Display**: time zone, 12/24 h clock, °F, auto page rotation, stale time, full-refresh interval, panel driver (`t7` / `gdey`; some 7.5" V2 batches need the second one).
-- **System**: name (also `<name>.local` and the Coeno id), settings password (HTTP basic auth, user `admin`), firmware check/install from Coeno, restart, erase.
+- **System**: name (also `<name>.local` and the Coeno id), settings password (HTTP basic auth, user `admin`; defaults to the board's setup Wi-Fi password, never blank; erasing settings keeps that password so a printed label stays valid), firmware check/install from Coeno, restart, erase.
 
-Passwords are stored on the panel (NVS) and never sent back to the browser.
+Passwords are stored on the panel (NVS) and never sent back to the browser. Everything needs the login except next page / refresh (`POST /api/page`, `/api/refresh`), which stay open like the button.
 
 ## What the screen does
 
@@ -95,7 +96,9 @@ Coeno → panel   panel_node/<name>/page/<n>     retained page JSON (n = 0..5)
                 panel_node/<name>/config       retained {"pages": n, "rotate_s": s}
                 panel_node/<name>/cmd/<what>   next | page {n} | refresh {full} | identify | check | update | ack
 panel → Coeno   panel_node/<name>/hello        retained, LWT {"online": false}
-                panel_node/<name>/state        retained every 60 s (page, alarms, rssi, build, available_build, …)
+                panel_node/<name>/state        retained on connect, on change (page, alarms, refresh, fault, update)
+                                               and every 60 s (page, alarms, rssi, build, available_build,
+                                               fault: "" when fine, chip_temp_c: reTerminal only, …)
                 panel_node/<name>/ack          {"ids": [...]} when the button acknowledges an alarm
 ```
 
@@ -105,8 +108,11 @@ Page JSON (parsed by `lib/panel/src/PageJson.cpp`):
 {"v": 1, "title": "Tank", "layout": "auto",
  "gauges": [{"id": "tank:ph", "label": "pH", "value": 8.12, "dec": 2, "unit": "",
              "src": "Hydros", "status": "ok", "note": "", "age_s": 30,
-             "lo": 7.9, "hi": 8.4, "spark": [8.10, 8.11, 8.12]}]}
+             "lo": 7.9, "hi": 8.4, "spark": [8.10, 8.11, 8.12],
+             "spark_lo": 7.92, "spark_hi": 8.32}]}
 ```
+
+`spark_lo` / `spark_hi` (optional) are the sparkline's y-range, already floored to a minimum span so normal noise draws flat. Data outside still widens it; the normal band is drawn where it falls inside. Without them the panel fits the data and band with a little padding.
 
 On the Coeno side, `coeno/services/panel_pages.py` builds the pages every 60 s and `/api/panel-nodes/*` configures them. A panel that says hello gets the default *Tank* and *Chemistry* pages until it is given its own.
 
@@ -135,7 +141,7 @@ instead. It checks every 6 h, or on *Check now* (System page). *Install update* 
 had it. *Install new builds by itself* makes it install automatically, never during an alarm. You can also
 upload a `firmware.bin` from the System page, or use `pio run -e epaper-net -t upload` from the Mac (only when
 the running build was made with `CALYX_OTA_PASS` set; public release builds don't listen for it). Coeno and
-GitHub updates are SHA-256 checked, and any new build that doesn't get on Wi-Fi and draw within 120 s rolls back.
+GitHub updates are SHA-256 checked (a manifest without `sha256` is refused), and any new build that doesn't get on Wi-Fi and draw within 120 s rolls back.
 
 `lib/panel` (model, text, layouts, page JSON, status rules) has no ESP32 code. The host renderer draws the exact same frames as the panel, which is where `docs/screens/` comes from.
 
