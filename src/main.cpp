@@ -383,6 +383,37 @@ void draw() {
   }
 }
 
+// What's wrong right now, for Coeno ("" = fine): the same things the footer
+// turns black for, plus a failed update.
+String faultText() {
+  const Settings &s = settings::get();
+  if (coenoMode()) {
+    uint32_t lp = coeno::lastPageMs();
+    if (s.coenoHost.length() && lp && (millis() - lp) / 1000 > s.stale_s) {
+      char a[16];
+      panel::formatAge((millis() - lp) / 1000, a, sizeof a);
+      return String("no page from Coeno for ") + a;
+    }
+  } else {
+    if (s.apexOn && !apex::ok() && (int32_t)(millis() - apex::lastOkMs()) > (int32_t)(s.stale_s * 1000UL))
+      return "Apex: " + apex::status();
+    if (s.hydrosOn && !hydros::ok() && millis() > 180000UL) return "Hydros: " + hydros::status();
+  }
+  String u = updateText.get();
+  if (u.startsWith("update failed")) return u;
+  return "";
+}
+
+// The chip's own temperature, where the sensor is worth reading (ESP32-S3,
+// reTerminal). The classic ESP32's sensor is unreliable: left out.
+float chipTempC() {
+#if CONFIG_IDF_TARGET_ESP32S3
+  float t = temperatureRead();
+  if (isfinite(t) && t > -40 && t < 125) return t;
+#endif
+  return NAN;
+}
+
 void publishState() {
   JsonDocument d;
   d["page"] = curPage;
@@ -401,9 +432,44 @@ void publishState() {
   d["acked"] = acked;
   if (settings::get().apexOn) d["apex"] = apex::status();
   if (settings::get().hydrosOn) d["hydros"] = hydros::status();
+  d["fault"] = faultText();
+  float ct = chipTempC();
+  if (!isnan(ct)) d["chip_temp_c"] = roundf(ct * 10) / 10;
   String s;
   serializeJson(d, s);
   coeno::publishState(s);
+}
+
+// State goes to Coeno on connect, when something it shows changes (page,
+// alarms, a refresh, a fault, an update), and every 60 s as a heartbeat.
+// rssi / heap / uptime only ride along: they change all the time.
+String stateSignature() {
+  String sig = String(curPage) + "/" + nPages + "/" + settings::get().mode + "/" + availBuild + "/" + (acked ? 1 : 0) +
+               "/" + display::refreshes() + "/" + display::fullRefreshes() + "/" + faultText() + "/";
+  for (auto &al : alarms) sig += al.id + ",";
+  return sig;
+}
+
+void stateOnChange() {
+  static bool wasConnected = false;
+  static String lastSig;
+  static uint32_t lastCheckMs = 0, lastSentMs = 0;
+  uint32_t now = millis();
+  bool conn = coeno::connected();
+  if (!conn) {
+    wasConnected = false;
+    return;
+  }
+  if (now - lastCheckMs < 500) return;
+  lastCheckMs = now;
+  String sig = stateSignature();
+  bool fresh = !wasConnected;
+  if (!fresh && (sig == lastSig || now - lastSentMs < 1000)) return;
+  wasConnected = true;
+  lastSig = sig;
+  lastSentMs = now;
+  lastState = now;  // the heartbeat counts from here
+  publishState();
 }
 
 void onCoenoCommand(const String &leaf, const String &payload) {
@@ -778,14 +844,19 @@ void loop() {
     lastReminder = now;
     display::flash(1);
   }
-  if (now - lastState > 60000UL) {
-    lastState = now;
+  stateOnChange();
+  static uint32_t lastMemLog = 0;
+  if (now - lastMemLog > 60000UL) {
+    lastMemLog = now;
     // 8-bit-capable RAM is what TLS, Wi-Fi and the page can use (getFreeHeap
     // also counts IRAM that only takes 32-bit words).
     Serial.printf("[mem] free %u (8-bit %u), largest 8-bit block %u, lowest %u; stack unused: loop %u, net %u\n",
                   (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (unsigned)ESP.getMinFreeHeap(),
                   (unsigned)uxTaskGetStackHighWaterMark(nullptr), (unsigned)worker::stackFree());
+  }
+  if (now - lastState > 60000UL) {  // heartbeat
+    lastState = now;
     publishState();
   }
   if (rebootAsked && (int32_t)(now - rebootAt) > 0) ESP.restart();
