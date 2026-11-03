@@ -206,6 +206,8 @@ String applyJson(JsonObjectConst o) {
     s.gauges = ng;
   }
   if (o["admin_pass"].is<const char *>() || o["admin_pass"].is<JsonObjectConst>()) applySecret(o["admin_pass"], s.adminPass);
+  // Never open on the LAN: no settings password = the setup Wi-Fi password.
+  if (!s.adminPass.length() && s.apPass.length()) s.adminPass = s.apPass;
   return "";
 }
 
@@ -238,10 +240,18 @@ void load() {
     }
   }
   if (s.pages.empty()) s.pages.push_back(PageCfg());
+  bool dirty = false;
   if (s.apPass.length() < 8) {
     s.apPass = makeApPass();
-    save();
+    dirty = true;
   }
+  // Default settings password = the setup Wi-Fi password (the one on the
+  // screen / label). A password set earlier is kept.
+  if (!s.adminPass.length()) {
+    s.adminPass = s.apPass;
+    dirty = true;
+  }
+  if (dirty) save();
 }
 
 bool save() {
@@ -257,12 +267,20 @@ bool save() {
 }
 
 void factoryReset() {
+  // The setup Wi-Fi password survives, so a label printed with it stays valid;
+  // the settings password goes back to it.
+  String ap = s.apPass;
   Preferences p;
   if (p.begin(NS, false)) {
     p.clear();
     p.end();
   }
   s = Settings();
+  s.apPass = ap;
+  if (s.apPass.length() >= 8) {
+    s.adminPass = s.apPass;
+    save();
+  }
 }
 
 }  // namespace settings

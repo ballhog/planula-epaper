@@ -706,9 +706,9 @@ void renderSetup(Adafruit_GFX &d, const SetupInfo &s, const Chrome &c) {
   y += 40;
   drawTextFit(d, font::NumS, x + 24, y, s.url, INK, kW - x - 40);
   y += 46;
-  drawTextFit(d, font::Body, x, y, "Add your Wi-Fi there, then Coeno,", INK, kW - x - 20);
+  drawTextFit(d, font::Body, x, y, "Add your Wi-Fi and the data source.", INK, kW - x - 20);
   y += 28;
-  drawTextFit(d, font::Body, x, y, "Apex or Hydros as the data source.", INK, kW - x - 20);
+  drawTextFit(d, font::Body, x, y, "Settings login: admin + this password.", INK, kW - x - 20);
 }
 
 void renderSystem(Adafruit_GFX &d, const SystemInfo &s, const Chrome &c) {

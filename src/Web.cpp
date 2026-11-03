@@ -33,10 +33,20 @@ namespace {
 
 WebServer server(80);
 
+// Settings need the login (user "admin"; the password defaults to the setup
+// Wi-Fi password). A phone on the setup network has already given that same
+// password to join it, so it isn't asked again while the default is in use.
+bool authed() {
+  const Settings &s = settings::get();
+  const String &p = s.adminPass;
+  if (!p.length()) return true;  // only before load() has run
+  if (p == s.apPass && net::state() == net::State::SetupAp && server.client().localIP() == WiFi.softAPIP())
+    return true;
+  return server.authenticate("admin", p.c_str());
+}
+
 bool allowed() {
-  const String &p = settings::get().adminPass;
-  if (!p.length()) return true;
-  if (server.authenticate("admin", p.c_str())) return true;
+  if (authed()) return true;
   server.requestAuthentication(BASIC_AUTH, "Planula panel", "Password needed");
   return false;
 }
@@ -259,8 +269,8 @@ void handleReadings() {
   sendJson(200, d);
 }
 
+// Day-to-day controls (next page, refresh) stay open on the LAN, like the button.
 void handlePage() {
-  if (!allowed()) return;
   JsonDocument in;
   body(in);
   if (in["next"] | false) app::nextPage();
@@ -269,7 +279,6 @@ void handlePage() {
 }
 
 void handleRefresh() {
-  if (!allowed()) return;
   JsonDocument in;
   body(in);
   app::redraw(in["full"] | false);
@@ -328,8 +337,7 @@ String upError;
 void handleUploadData() {
   HTTPUpload &up = server.upload();
   if (up.status == UPLOAD_FILE_START) {
-    const String &p = settings::get().adminPass;
-    upDenied = p.length() && !server.authenticate("admin", p.c_str());
+    upDenied = !authed();
     upError = "";
     if (upDenied) return;
     Serial.printf("[update] upload %s\n", up.filename.c_str());

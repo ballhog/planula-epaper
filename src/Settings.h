@@ -61,8 +61,9 @@ struct Settings {
   std::vector<PageCfg> pages;
   std::vector<GaugeCfg> gauges;
 
-  String adminPass;  // settings page password ("" = open on the LAN)
-  String apPass;     // setup Wi-Fi password, made once per board
+  String adminPass;  // settings page password (user "admin"); defaults to apPass, never blank
+  String apPass;     // setup Wi-Fi password, made once per board; survives factoryReset()
+                     // so a printed label stays valid
 };
 
 namespace settings {
@@ -70,12 +71,15 @@ namespace settings {
 Settings &get();
 void load();
 bool save();
+// Erase everything but the setup Wi-Fi password (apPass); the settings
+// password goes back to it.
 void factoryReset();
 
 // JSON for the web page. Passwords become {"set": true} unless withSecrets.
 void toJson(JsonObject o, bool withSecrets);
 // Apply a (partial) JSON update. Password fields left out or "" keep their
-// value; {"clear": true} clears them. Returns "" or an error.
+// value; {"clear": true} clears them (the settings password goes back to the
+// setup Wi-Fi password instead). Returns "" or an error.
 String applyJson(JsonObjectConst o);
 
 }  // namespace settings
