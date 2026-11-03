@@ -6,8 +6,8 @@
 // via the Update library (writes to the inactive OTA slot, flips boot only on
 // success), and reboots.
 //
-// Manifest shape (served by the Pi at OTA_MANIFEST_URL):
-//   { "build": 1234, "version": "v1.2-3-gabc", "url": "http://10.0.0.228:8000/firmware/calyx-sense/calyx-sense-1234.bin",
+// Manifest shape (served by Coeno at http://<coeno>:8000/firmware/<image>/latest.json):
+//   { "build": 1234, "version": "v1.2-3-gabc", "url": "http://<coeno>:8000/firmware/calyx-sense/calyx-sense-1234.bin",
 //     "sha256": "<64 hex>", "size": 1353552 }
 //
 // Returns:

@@ -177,7 +177,9 @@ void fillChrome(panel::Chrome &c) {
   if (coenoMode()) {
     uint32_t lp = coeno::lastPageMs();
     uint32_t age = lp ? (millis() - lp) / 1000 : 0;
-    if (!coeno::connected()) {
+    if (!s.coenoHost.length()) {
+      left = "Standalone · no Coeno address set";
+    } else if (!coeno::connected()) {
       left = "Coeno offline · showing the last pages";
       alert = true;
     } else if (lp && age > s.stale_s) {
@@ -344,7 +346,11 @@ void draw() {
     if (!p || !fetchPage(curPage, *p)) {
       String body;
       String title;
-      if (coenoMode()) {
+      if (coenoMode() && !s.coenoHost.length()) {
+        title = "Standalone";
+        body = "Connected to Wi-Fi as " + net::ip() + ". No Coeno address set.\n" +
+               "Set the Coeno address, or switch to direct mode, at\nhttp://" + s.name + ".local";
+      } else if (coenoMode()) {
         title = "Waiting for Coeno";
         body = "Connected to Wi-Fi as " + net::ip() + ".\nCoeno: " + coeno::status() +
                ".\nAdd this panel in Coeno, or switch to direct mode at\nhttp://" + s.name + ".local";

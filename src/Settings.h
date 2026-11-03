@@ -35,7 +35,7 @@ struct Settings {
   String mode = "coeno";             // coeno | direct
   std::vector<WifiNet> wifi;         // tried strongest-first
 
-  String coenoHost = "10.0.0.228";
+  String coenoHost;  // "" = standalone (no Coeno) until one is set; saved hosts are kept
   uint16_t coenoPort = 1883;
   String coenoUser, coenoPass;  // broker login (Coeno issues it when the panel is adopted)
   bool coenoUpdates = true;  // check Coeno for firmware

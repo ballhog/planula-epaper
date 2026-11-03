@@ -308,7 +308,7 @@ bool connected() { return isConnected; }
 
 String status() {
   const Settings &s = settings::get();
-  if (!s.coenoHost.length()) return "no Coeno host set";
+  if (!s.coenoHost.length()) return "standalone · no Coeno address set";
   if (s.mode != "coeno") return "not used in direct mode (updates still checked at " + s.coenoHost + ")";
   if (!isConnected) return "connecting to " + s.coenoHost;
   if (!lastPage) return "connected · no page yet";
