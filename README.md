@@ -99,6 +99,7 @@ panel → Coeno   panel_node/<name>/hello        retained, LWT {"online": false}
                 panel_node/<name>/state        retained on connect, on change (page, alarms, refresh, fault, update)
                                                and every 60 s (page, alarms, rssi, build, available_build,
                                                fault: "" when fine, chip_temp_c: reTerminal only, …)
+                                               state and hello carry coeno_login: true when connected on its own broker login
                 panel_node/<name>/ack          {"ids": [...]} when the button acknowledges an alarm
 ```
 

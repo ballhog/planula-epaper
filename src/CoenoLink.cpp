@@ -23,6 +23,7 @@ namespace {
 esp_mqtt_client_handle_t client = nullptr;
 volatile bool isConnected = false;
 String prefix, uri, lwt, clientId, activeKey;
+String connUser, connPass;  // the login the running client uses (must outlive its config)
 SemaphoreHandle_t mu = nullptr;
 
 // Allocated on first start (Coeno mode only): ~23 kB the panel needs in direct
@@ -66,6 +67,7 @@ String hello(bool online) {
     d["width"] = 800;
     d["height"] = 480;
     d["describe_rev"] = "b" + String(FW_BUILD);   // the description only changes with the firmware
+    d["coeno_login"] = isConnected && connUser.length() > 0;  // on its own broker login
   }
   String s;
   serializeJson(d, s);
@@ -250,15 +252,14 @@ void start() {
   uri = "mqtt://" + s.coenoHost + ":" + String(s.coenoPort);
   lwt = hello(false);
   clientId = s.name;
-  static String user, pass;  // must outlive the client config
-  user = s.coenoUser;
-  pass = s.coenoPass;
+  connUser = s.coenoUser;
+  connPass = s.coenoPass;
   esp_mqtt_client_config_t cfg = {};
   cfg.broker.address.uri = uri.c_str();
   cfg.credentials.client_id = clientId.c_str();
-  if (user.length()) {  // Coeno's broker login for this panel (device standard: adoption)
-    cfg.credentials.username = user.c_str();
-    cfg.credentials.authentication.password = pass.c_str();
+  if (connUser.length()) {  // Coeno's broker login for this panel (device standard: adoption)
+    cfg.credentials.username = connUser.c_str();
+    cfg.credentials.authentication.password = connPass.c_str();
   }
   cfg.session.keepalive = 30;
   cfg.session.last_will.topic = nullptr;
@@ -305,6 +306,7 @@ void loop() {
 
 void restart() { stop(); }
 bool connected() { return isConnected; }
+bool loggedIn() { return isConnected && connUser.length() > 0; }
 
 String status() {
   const Settings &s = settings::get();

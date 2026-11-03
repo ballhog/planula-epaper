@@ -23,6 +23,7 @@ namespace coeno {
 void loop();      // starts/stops the client to match the settings
 void restart();   // after a host/name change
 bool connected();
+bool loggedIn();   // connected with its own (non-empty) broker login
 String status();
 
 int pageCount();  // from config, else highest page received + 1

@@ -435,6 +435,7 @@ void publishState() {
   d["fault"] = faultText();
   float ct = chipTempC();
   if (!isnan(ct)) d["chip_temp_c"] = roundf(ct * 10) / 10;
+  d["coeno_login"] = coeno::loggedIn();
   String s;
   serializeJson(d, s);
   coeno::publishState(s);
