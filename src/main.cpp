@@ -616,11 +616,17 @@ void checkUpdates() {
     return;
   }
   long b = m["build"] | 0L;
-  if (b > FW_BUILD && m["url"].is<const char *>()) {
+  String sha = m["sha256"] | "";
+  bool shaOk = sha.length() == 64;
+  for (size_t i = 0; shaOk && i < sha.length(); i++) shaOk = isxdigit((unsigned char)sha[i]);
+  if (b > FW_BUILD && m["url"].is<const char *>() && !shaOk) {
+    // Never install a build that can't be checked.
+    updateText.set(coenoWhy + "GitHub: build " + String(b) + " refused, manifest has no sha256");
+  } else if (b > FW_BUILD && m["url"].is<const char *>()) {
     availBuild = b;
     availSource = "github";
     availUrl = m["url"].as<const char *>();
-    availSha = m["sha256"] | "";
+    availSha = sha;
     availSize = m["size"] | 0;
     updateText.set("build " + String(b) + " ready on GitHub");
   } else {

@@ -147,7 +147,16 @@ static Result requestJsonImpl(const char *method, const String &url, const Heade
   return r;
 }
 
+static bool isSha256Hex(const String &h) {
+  if (h.length() != 64) return false;
+  for (char ch : h)
+    if (!isxdigit((unsigned char)ch)) return false;
+  return true;
+}
+
 static String downloadImpl(const String &url, const String &shaHex, size_t size, void (*progress)(int)) {
+  // No checksum, no install (the GitHub manifest always carries one).
+  if (!isSha256Hex(shaHex)) return "no sha256 in the manifest";
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
   cfg.timeout_ms = 20000;
@@ -196,7 +205,7 @@ static String downloadImpl(const String &url, const String &shaHex, size_t size,
   mbedtls_sha256_finish(&sha, digest);
   mbedtls_sha256_free(&sha);
   if (!err.length() && size && total != size) err = "short download";
-  if (!err.length() && shaHex.length()) {
+  if (!err.length()) {
     char hex[65];
     for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", digest[i]);
     if (!shaHex.equalsIgnoreCase(hex)) err = "checksum mismatch";

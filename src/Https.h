@@ -29,6 +29,7 @@ Result requestJson(const char *method, const String &url, const Headers &headers
 
 // Download url (following redirects) into the inactive app slot, checking the
 // SHA-256 before switching. progress(pct) is optional. Returns "" or an error.
+// sha256Hex (64 hex) is required: without it nothing is downloaded.
 String downloadFirmware(const String &url, const String &sha256Hex, size_t size, void (*progress)(int pct));
 
 }  // namespace https
