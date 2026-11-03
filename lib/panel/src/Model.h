@@ -40,6 +40,10 @@ struct Gauge {
   uint8_t dec = 1;       // decimals shown
   bool hasRange = false; // normal band, drawn on the sparkline
   float lo = 0, hi = 0;
+  // y-range to draw the sparkline on (Coeno's spark_lo/spark_hi, already floored
+  // to the input's minimum span so normal noise draws flat). Data outside widens it.
+  bool hasSparkRange = false;
+  float sparkLo = 0, sparkHi = 0;
   Status status = Status::Missing;
   uint32_t age_s = 0;    // age of the value when the page was built
   uint8_t nspark = 0;    // sparkline points, oldest first

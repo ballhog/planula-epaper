@@ -142,6 +142,28 @@ static void samples() {
   chromeFor(c, 2, 3);
   shot(cv, "4-single", [&](Adafruit_GFX &d) { render(d, s, c); });
 
+  // 14. Sparkline y-range from Coeno (spark_lo/spark_hi): the same quiet pH
+  // trace drawn without (left, fills the box) and with a 0.4 range (right,
+  // draws nearly flat). The right one also has a point outside the range,
+  // which widens it rather than being clipped.
+  {
+    Page sr;
+    PANEL_COPY(sr.title, "Spark range");
+    sr.layout = Layout::Single;
+    sr.g[0] = mk("tank:ph", "pH auto", 8.12f, 2, "", "Calyx", 8.05f, 8.2f, 20);
+    spark(sr.g[0], 8.12f, 0.02f, 0.0f);
+    sr.g[1] = sr.g[0];
+    PANEL_COPY(sr.g[1].label, "pH spark range");
+    sr.g[1].hasSparkRange = true;
+    sr.g[1].sparkLo = 7.92f;
+    sr.g[1].sparkHi = 8.32f;
+    sr.g[1].spark[30] = 8.45f;  // outside the range: widens it
+    sr.n = 2;
+    sr.layout = Layout::Auto;
+    chromeFor(c, 0, 1);
+    shot(cv, "14-spark-range", [&](Adafruit_GFX &d) { render(d, sr, c); });
+  }
+
   // 5. List of eight.
   Page l;
   PANEL_COPY(l.title, "Everything");
@@ -290,7 +312,22 @@ static void tests() {
   CHECK(p.g[0].status == Status::Warn && p.g[0].nspark == 3 && p.g[0].hasRange && fabsf(p.g[0].value - 8.12f) < 1e-4);
   CHECK(p.g[1].status == Status::Missing && !p.g[1].has);
   CHECK(p.g[2].has && p.g[2].status == Status::Ok && p.g[2].value == 450);
+  CHECK(!p.g[0].hasSparkRange);
   CHECK(parsePage("nope", 4, p)[0]);
+
+  // spark_lo / spark_hi: optional, both numbers, hi > lo.
+  {
+    const char *js = R"({"v":1,"gauges":[
+      {"id":"a","value":8.1,"spark":[8.1,8.11],"spark_lo":7.9,"spark_hi":8.3},
+      {"id":"b","value":8.1,"spark_lo":8,"spark_hi":8},
+      {"id":"c","value":8.1,"spark_lo":7.9},
+      {"id":"d","value":8.1,"spark_lo":"7.9","spark_hi":8.3}]})";
+    Page sp;
+    CHECK(!parsePage(js, strlen(js), sp)[0]);
+    CHECK(sp.n == 4);
+    CHECK(sp.g[0].hasSparkRange && fabsf(sp.g[0].sparkLo - 7.9f) < 1e-4 && fabsf(sp.g[0].sparkHi - 8.3f) < 1e-4);
+    CHECK(!sp.g[1].hasSparkRange && !sp.g[2].hasSparkRange && !sp.g[3].hasSparkRange);
+  }
 
   int c, r;
   Page q; q.n = 5; gridFor(q, c, r); CHECK(c == 3 && r == 2);

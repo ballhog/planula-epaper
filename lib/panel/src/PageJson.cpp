@@ -80,6 +80,15 @@ const char *parsePage(const char *json, size_t len, Page &out) {
       g.lo = lo.as<float>();
       g.hi = hi.as<float>();
     }
+    JsonVariant slo = j["spark_lo"], shi = j["spark_hi"];
+    if ((slo.is<float>() || slo.is<int>()) && (shi.is<float>() || shi.is<int>())) {
+      float a = slo.as<float>(), b = shi.as<float>();
+      g.hasSparkRange = isfinite(a) && isfinite(b) && b > a;
+      if (g.hasSparkRange) {
+        g.sparkLo = a;
+        g.sparkHi = b;
+      }
+    }
     g.age_s = j["age_s"] | 0;
     g.status = j["status"].is<const char *>() ? statusFromName(j["status"]) : (g.has ? Status::Ok : Status::Missing);
     if (!g.has) g.status = Status::Missing;

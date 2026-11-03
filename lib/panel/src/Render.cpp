@@ -83,32 +83,48 @@ void sparkline(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, uint
     if (g.spark[i] < mn) mn = g.spark[i];
     if (g.spark[i] > mx) mx = g.spark[i];
   }
-  if (g.hasRange) {
-    if (g.lo < mn) mn = g.lo;
-    if (g.hi > mx) mx = g.hi;
+  if (g.hasSparkRange) {
+    // Coeno's y-range (already floored to a minimum span): data outside still
+    // widens it, the normal band doesn't (it is drawn where it falls inside).
+    if (g.sparkLo < mn) mn = g.sparkLo;
+    if (g.sparkHi > mx) mx = g.sparkHi;
+  } else {
+    if (g.hasRange) {
+      if (g.lo < mn) mn = g.lo;
+      if (g.hi > mx) mx = g.hi;
+    }
+    float span = mx - mn;
+    if (span < 1e-6f) span = fabsf(mx) * 0.02f + 0.1f;
+    mn -= span * 0.08f;
+    mx += span * 0.08f;
   }
   float span = mx - mn;
-  if (span < 1e-6f) span = fabsf(mx) * 0.02f + 0.1f;
-  mn -= span * 0.08f;
-  mx += span * 0.08f;
-  span = mx - mn;
+  if (span < 1e-6f) span = 1e-6f;
   int labelW = labels && g.hasRange ? 56 : 0;
   int pw = w - labelW;
   auto Y = [&](float v) { return y + h - 1 - (int)lroundf((v - mn) / span * (h - 3)) - 1; };
   if (g.hasRange) {
     int ylo = Y(g.lo), yhi = Y(g.hi);
-    dashedH(d, x, x + pw - 1, ylo, fg, 3, 5);
-    dashedH(d, x, x + pw - 1, yhi, fg, 3, 5);
-    if (labelW) {
-      char b[16];
-      Gauge t = g;
-      t.has = true;
-      t.value = g.hi;
-      formatValue(t, b, sizeof b);
-      drawText(d, font::Small, x + w, yhi + 5, b, fg, Right);
-      t.value = g.lo;
-      formatValue(t, b, sizeof b);
-      drawText(d, font::Small, x + w, ylo + 5, b, fg, Right);
+    char b[16];
+    Gauge t = g;
+    t.has = true;
+    // Only the band lines that fall inside the plot (a spark range may be
+    // narrower than the band).
+    if (yhi >= y && yhi < y + h) {
+      dashedH(d, x, x + pw - 1, yhi, fg, 3, 5);
+      if (labelW) {
+        t.value = g.hi;
+        formatValue(t, b, sizeof b);
+        drawText(d, font::Small, x + w, yhi + 5, b, fg, Right);
+      }
+    }
+    if (ylo >= y && ylo < y + h) {
+      dashedH(d, x, x + pw - 1, ylo, fg, 3, 5);
+      if (labelW) {
+        t.value = g.lo;
+        formatValue(t, b, sizeof b);
+        drawText(d, font::Small, x + w, ylo + 5, b, fg, Right);
+      }
     }
   }
   int px = x, py = Y(g.spark[0]);
