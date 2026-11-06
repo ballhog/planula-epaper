@@ -24,6 +24,21 @@ Status statusFromName(const char *s) {
   return Status::Missing;
 }
 
+const char *viewName(View v) {
+  switch (v) {
+    case View::Numbers: return "numbers";
+    case View::Graphs: return "graphs";
+    default: return "both";
+  }
+}
+
+View viewFromName(const char *s) {
+  if (!s) return View::Both;
+  if (!strcmp(s, "numbers")) return View::Numbers;
+  if (!strcmp(s, "graphs")) return View::Graphs;
+  return View::Both;
+}
+
 const char *layoutName(Layout l) {
   switch (l) {
     case Layout::Single: return "single";

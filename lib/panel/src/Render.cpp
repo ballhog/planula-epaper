@@ -167,9 +167,10 @@ struct TileGeom {
   int valueMaxH;
   int unitW;
   bool wantSpark;
+  bool graphs;      // View::Graphs: trend gets most of the tile
 };
 
-TileGeom geom(const Gauge &g, int w, int h) {
+TileGeom geom(const Gauge &g, int w, int h, View view) {
   TileGeom t;
   t.big = w >= 500 && h >= 300;
   t.pad = t.big ? 22 : 14;
@@ -178,19 +179,38 @@ TileGeom geom(const Gauge &g, int w, int h) {
   t.uf = t.big ? font::Head : (w >= 360 ? font::Label : font::Body);
   t.unitW = g.unit[0] ? textWidth(t.uf, g.unit) + 6 : 0;
   int availH = h - t.ly - t.pad - 14;
-  t.wantSpark = g.nspark >= 2;
-  t.valueMaxH = t.wantSpark ? availH * (t.big ? 58 : 52) / 100 : availH;
+  t.graphs = view == View::Graphs;
+  // Graphs: keep the plot area even before there's a trend, so the page layout
+  // doesn't jump when the first points arrive.
+  t.wantSpark = view == View::Numbers ? false : t.graphs ? true : g.nspark >= 2;
+  int pct = t.graphs ? 30 : t.big ? 58 : 52;
+  t.valueMaxH = t.wantSpark ? availH * pct / 100 : availH;
   return t;
 }
 
-const GFXfont *tileValueFont(const Gauge &g, int w, int h) {
-  TileGeom t = geom(g, w, h);
+const GFXfont *tileValueFont(const Gauge &g, int w, int h, View view) {
+  TileGeom t = geom(g, w, h, view);
   char val[16];
   formatValue(g, val, sizeof val);
   return valueFontFor(w - 2 * t.pad, t.valueMaxH, val, t.unitW);
 }
 
-void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFXfont *vfShared) {
+// 24 h low / high of the trend, formatted like the value.
+static void sparkMinMax(const Gauge &g, char *lo, char *hi, size_t n) {
+  float mn = g.spark[0], mx = g.spark[0];
+  for (int i = 1; i < g.nspark; i++) {
+    if (g.spark[i] < mn) mn = g.spark[i];
+    if (g.spark[i] > mx) mx = g.spark[i];
+  }
+  Gauge t = g;
+  t.has = true;
+  t.value = mn;
+  formatValue(t, lo, n);
+  t.value = mx;
+  formatValue(t, hi, n);
+}
+
+void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFXfont *vfShared, View view) {
   bool alarm = g.status == Status::Alarm;
   uint16_t fg = alarm ? PAPER : INK, bg = alarm ? INK : PAPER;
   if (alarm) d.fillRoundRect(x, y, w, h, 10, INK);
@@ -198,7 +218,7 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
   else if (g.status == Status::Stale || g.status == Status::Missing) dashedRect(d, x, y, w, h, INK, 2);
   else thickRoundRect(d, x, y, w, h, 10, 2, INK);
 
-  TileGeom t = geom(g, w, h);
+  TileGeom t = geom(g, w, h, view);
   bool big = t.big;
   int pad = t.pad;
   const GFXfont *lf = t.lf;
@@ -225,12 +245,35 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
   formatValue(g, val, sizeof val);
   const GFXfont *uf = t.uf;
   bool wantSpark = t.wantSpark;
-  const GFXfont *vf = vfShared ? vfShared : tileValueFont(g, w, h);
+  const GFXfont *vf = vfShared ? vfShared : tileValueFont(g, w, h, view);
   int va = ascent(vf);
   int vy = ly + 14 + va;
   if (!wantSpark) vy = y + h / 2 + (ly - y) / 2 + va / 2 - 4;
   int vw = drawText(d, vf, x + pad - (big ? 4 : 2), vy, val, fg);
   if (g.unit[0]) drawText(d, uf, x + pad + vw + 4, vy, g.unit, fg);
+
+  // Graphs view: the trend fills the rest, low / high of the last 24 h under it.
+  if (wantSpark && t.graphs) {
+    int sy = vy + (big ? 22 : 12);
+    bool caption = h - (sy - y) >= 80;
+    int sh = y + h - pad - sy - (caption ? 22 : 0);
+    if (g.nspark >= 2) {
+      sparkline(d, g, x + pad, sy, w - 2 * pad, sh, fg, w >= 300);
+      if (caption) {
+        char lo[16], hi[16], line[48];
+        sparkMinMax(g, lo, hi, sizeof lo);
+        snprintf(line, sizeof line, "low %s · high %s", lo, hi);
+        drawTextFit(d, font::Small, x + pad, y + h - pad + 2, line, fg, w - 2 * pad - 70);
+        drawText(d, font::Small, x + w - pad, y + h - pad + 2, "24 h", fg, Right);
+      }
+    } else {
+      // Direct mode keeps one point per 30 min, so a trend needs about an hour.
+      dashedRect(d, x + pad, sy, w - 2 * pad, sh > 20 ? sh : 20, fg, 1);
+      drawTextFit(d, font::Small, x + w / 2, sy + sh / 2 + 6, "trend after about 1 h", fg, w - 2 * pad - 16,
+                  Center);
+    }
+    return;
+  }
 
   // Sparkline under the value.
   if (wantSpark) {
@@ -257,13 +300,13 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
 
 // ── list layout: one gauge per row ───────────────────────────────────────
 
-void listRow(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h) {
+void listRow(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, View view) {
   bool alarm = g.status == Status::Alarm;
   uint16_t fg = alarm ? PAPER : INK, bg = alarm ? INK : PAPER;
   if (alarm) d.fillRoundRect(x, y + 1, w, h - 2, 6, INK);
   int base = y + h / 2 + 8;
   drawTextFit(d, font::Body, x + 12, base, g.label, fg, 250);
-  if (g.nspark >= 2) {
+  if (g.nspark >= 2 && view != View::Numbers) {
     Gauge s = g;
     s.hasRange = g.hasRange;
     sparkline(d, s, x + 280, y + 6, 230, h - 12, fg, false);
@@ -616,7 +659,7 @@ void render(Adafruit_GFX &d, const Page &p, const Chrome &c) {
     int rh = kBodyH / n;
     if (rh > 56) rh = 56;
     int y0 = kBodyY + (kBodyH - rh * n) / 2;
-    for (int i = 0; i < n; i++) listRow(d, p.g[i], kBodyX, y0 + i * rh, kBodyW, rh);
+    for (int i = 0; i < n; i++) listRow(d, p.g[i], kBodyX, y0 + i * rh, kBodyW, rh, p.view);
     return;
   }
   int tw = (kBodyW - (cols - 1) * kGap) / cols;
@@ -625,12 +668,12 @@ void render(Adafruit_GFX &d, const Page &p, const Chrome &c) {
   // One value size for the whole page, so tiles line up: the smallest any tile needs.
   const GFXfont *shared = nullptr;
   for (int i = 0; i < n; i++) {
-    const GFXfont *f = tileValueFont(p.g[i], tw, th);
+    const GFXfont *f = tileValueFont(p.g[i], tw, th, p.view);
     if (!shared || ascent(f) < ascent(shared)) shared = f;
   }
   for (int i = 0; i < n; i++) {
     int cx = i % cols, cy = i / cols;
-    tile(d, p.g[i], kBodyX + cx * (tw + kGap), kBodyY + cy * (th + kGap), tw, th, shared);
+    tile(d, p.g[i], kBodyX + cx * (tw + kGap), kBodyY + cy * (th + kGap), tw, th, shared, p.view);
   }
 }
 

@@ -114,10 +114,12 @@ bool fetchPage(int i, panel::Page &p) {
   p.h12 = !settings::get().clock24;
   if (!coenoMode()) {
     direct::build(i, p);
+    p.view = panel::viewFromName(settings::get().view.c_str());
     return true;
   }
   uint32_t at;
   if (!coeno::getPage(i, p, at)) return false;
+  p.view = panel::viewFromName(settings::get().view.c_str());
   p.h12 = !settings::get().clock24;
   uint32_t pageAge = (millis() - at) / 1000;
   panel::shiftTimeline(p, pageAge / 60);  // "now" moves on between Coeno's pages
@@ -369,7 +371,8 @@ void draw() {
       screen = title;
     } else {
       scene = [p, c](Adafruit_GFX &d) { panel::render(d, *p, c); };
-      screen = "page:" + String(curPage) + ":" + String(p->n) + ":" + String(nPages);
+      // The view is part of the screen: switching it redraws with a full refresh.
+      screen = "page:" + String(curPage) + ":" + String(p->n) + ":" + String(nPages) + ":" + panel::viewName(p->view);
     }
   }
   // A new build has proven itself once it is on Wi-Fi and drawing.
@@ -540,6 +543,97 @@ void button() {
   }
   wasDown = down;
 }
+
+#if defined(BOARD_RETERMINAL)
+// ── reTerminal E1001 keys (Seeed: KEY0 GPIO3 right/green, KEY1 GPIO4 middle,
+// KEY2 GPIO5 left; active low) ─────────────────────────────────────────────
+//   left / right       previous / next page
+//   middle             acknowledge the alarm, else switch the view
+//                      (number + trend -> graphs -> numbers only)
+//   middle hold 3 s    System screen (hold again there = check for updates)
+//   middle hold 10 s   open the setup network
+//   left + right 10 s  erase settings
+struct Key {
+  int pin;
+  bool down = false, longDone = false;
+  uint32_t at = 0, changed = 0;
+};
+Key keyRight{3}, keyMid{4}, keyLeft{5};
+
+// Debounced: true when the key changed state this pass.
+bool readKey(Key &k, uint32_t now) {
+  bool d = digitalRead(k.pin) == LOW;
+  if (d == k.down || now - k.changed < 30) return false;
+  k.down = d;
+  k.changed = now;
+  if (d) {
+    k.at = now;
+    k.longDone = false;
+  }
+  return true;
+}
+
+void keysBegin() {
+  pinMode(keyRight.pin, INPUT_PULLUP);
+  pinMode(keyMid.pin, INPUT_PULLUP);
+  pinMode(keyLeft.pin, INPUT_PULLUP);
+}
+
+void keys() {
+  uint32_t now = millis();
+  bool eR = readKey(keyRight, now), eM = readKey(keyMid, now), eL = readKey(keyLeft, now);
+  if (eR || eM || eL)
+    Serial.printf("[keys] left %s, middle %s, right %s\n", keyLeft.down ? "down" : "up", keyMid.down ? "down" : "up",
+                  keyRight.down ? "down" : "up");
+
+  // Left + right held together: erase.
+  if (keyLeft.down && keyRight.down) {
+    uint32_t both = now - max(keyLeft.at, keyRight.at);
+    if (both > 10000) {
+      settings::factoryReset();
+      panel::Chrome c;
+      display::show(message("Settings erased", "Restarting into setup mode…", "", c), true);
+      delay(500);
+      ESP.restart();
+    }
+    if (both > 300) keyLeft.longDone = keyRight.longDone = true;  // no page turn after a chord
+    return;
+  }
+
+  bool infoUp = infoUntil && now < infoUntil;
+  if (eL && !keyLeft.down && !keyLeft.longDone) {
+    if (infoUp) infoUntil = 0, app::redraw(false);
+    else app::prevPage();
+  }
+  if (eR && !keyRight.down && !keyRight.longDone) {
+    if (infoUp) infoUntil = 0, app::redraw(false);
+    else app::nextPage();
+  }
+  if (eM && !keyMid.down && !keyMid.longDone) {
+    uint32_t held = now - keyMid.at;
+    if (held >= 10000) {
+      net::openSetup("Setup network opened with the button.");
+      app::redraw(false);
+    } else if (held >= 3000) {
+      if (infoUp && coenoLinked()) app::checkUpdateSoon();
+      infoUntil = now + 120000;
+      app::redraw(false);
+    } else if (infoUp) {
+      if (availBuild > 0 && coenoLinked()) {
+        app::installUpdateSoon();
+        infoUntil = now + 120000;
+      } else {
+        infoUntil = 0;
+      }
+      app::redraw(false);
+    } else if (!alarms.empty() && !acked) {
+      app::ackAlarm();
+    } else {
+      app::cycleView();
+    }
+  }
+}
+#endif
 
 // Network upload from the Mac: pio run -e epaper-net -t upload
 // (password = CALYX_OTA_PASS at build time; empty = no password).
@@ -733,6 +827,14 @@ void gotoPage(int n) {
   redrawAsked = true;
 }
 void nextPage() { gotoPage(nPages ? (curPage + 1) % nPages : 0); }
+void prevPage() { gotoPage(nPages ? (curPage + nPages - 1) % nPages : 0); }
+void cycleView() {
+  Settings &s = settings::get();
+  s.view = s.view == "both" ? "graphs" : s.view == "graphs" ? "numbers" : "both";
+  settings::save();
+  Serial.printf("[view] %s\n", s.view.c_str());
+  redrawAsked = true;
+}
 void redraw(bool full) {
   redrawAsked = true;
   fullAsked |= full;
@@ -779,7 +881,11 @@ void setRebootNeeded() { needsReboot = true; }
 void setup() {
   Serial.begin(115200);
   ota_begin_boot_check();
+#if defined(BOARD_RETERMINAL)
+  keysBegin();
+#else
   pinMode(PIN_BUTTON, INPUT_PULLUP);
+#endif
   settings::load();
   Serial.printf("\nPlanula-ePaper build %d (%s), name %s, mode %s\n", FW_BUILD, FW_VERSION,
                 settings::get().name.c_str(), settings::get().mode.c_str());
@@ -802,7 +908,11 @@ void loop() {
   uint32_t now = millis();
   net::loop();
   web::loop();
+#if defined(BOARD_RETERMINAL)
+  keys();
+#else
   button();
+#endif
   coeno::loop();
   apex::loop();
   updates();  // before Hydros: the boot-time check runs before its session opens

@@ -101,6 +101,13 @@ static void samples() {
   p.n = 4;
   chromeFor(c, 0, 3);
   shot(cv, "1-tank-2x2", [&](Adafruit_GFX &d) { render(d, p, c); });
+  {
+    Page pg = p;
+    pg.view = View::Graphs;
+    shot(cv, "15-tank-2x2-graphs", [&](Adafruit_GFX &d) { render(d, pg, c); });
+    pg.view = View::Numbers;
+    shot(cv, "16-tank-2x2-numbers", [&](Adafruit_GFX &d) { render(d, pg, c); });
+  }
 
   // 2. Six gauges, salinity in alarm: banner + inverted tile.
   Page q;
@@ -128,6 +135,12 @@ static void samples() {
   PANEL_COPY(c.alarm, "SALINITY LOW 31.2 ppt");
   c.alarmCount = 1;
   shot(cv, "2-chem-3x2-alarm", [&](Adafruit_GFX &d) { render(d, q, c); });
+  {
+    Page qg = q;
+    qg.view = View::Graphs;
+    qg.g[1].nspark = 0;  // one tile with no trend yet
+    shot(cv, "17-chem-3x2-graphs", [&](Adafruit_GFX &d) { render(d, qg, c); });
+  }
   c.alarmAcked = true;
   shot(cv, "3-chem-3x2-acked", [&](Adafruit_GFX &d) { render(d, q, c); });
   c.alarm[0] = 0;

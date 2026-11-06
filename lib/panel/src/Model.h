@@ -13,6 +13,13 @@ constexpr int kSparkLen = 48;
 
 enum class Status : uint8_t { Ok, Warn, Alarm, Stale, Missing };
 enum class Layout : uint8_t { Auto, Single, Grid2x2, Grid3x2, List, Timeline };
+// How tiles split their space (the panel's own choice, a button on the reTerminal):
+//   Both    - big number with the 24 h trend under it (the default)
+//   Numbers - numbers only, as big as they fit
+//   Graphs  - the trend fills the tile, with its 24 h low/high; the number is smaller
+enum class View : uint8_t { Both, Numbers, Graphs };
+const char *viewName(View v);
+View viewFromName(const char *s);
 
 // Timeline pages: each gauge is one lane, time runs left to right.
 //   Level  - a value that ramps between points (light intensity, pump speed %)
@@ -65,6 +72,7 @@ struct Page {
   int16_t clock = -1;
   bool day = false;  // window is today, midnight to midnight
   bool h12 = true;   // 12-hour clock labels
+  View view = View::Both;  // set by the panel, not by Coeno
   void clear() {
     title[0] = 0; layout = Layout::Auto; n = 0;
     from = -720; to = 720; clock = -1; day = false;

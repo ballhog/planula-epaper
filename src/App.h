@@ -8,6 +8,9 @@ int page();
 int pages();
 void gotoPage(int n);
 void nextPage();
+void prevPage();
+// Tiles: number + trend -> graphs -> numbers only -> ... (saved).
+void cycleView();
 void redraw(bool full);  // redraw soon (full = flashing refresh)
 void ackAlarm();
 String alarmsJson();     // [{"id","text"}]

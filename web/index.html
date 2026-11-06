@@ -127,6 +127,7 @@ th{font-size:12px;color:var(--muted);font-weight:500}
    <option value="MST7MDT,M3.2.0,M11.1.0">Mountain</option><option value="MST7">Arizona</option><option value="PST8PDT,M3.2.0,M11.1.0">Pacific</option>
    <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe</option><option value="GMT0BST,M3.5.0/1,M10.5.0">UK</option><option value="UTC0">UTC</option></select></div>
    <div><label>Change page every (seconds, 0 = only with the button)</label><input id="rotate" type="number" min="0"></div></div>
+  <div class="row"><div><label>Tiles show</label><select id="view"><option value="both">Number and trend</option><option value="numbers">Numbers only (big)</option><option value="graphs">Graphs (24 h trend, low/high)</option></select></div></div>
   <label><input type="checkbox" id="clock24"> 24-hour clock</label>
   <label><input type="checkbox" id="tempF"> Show temperatures in °F (direct mode)</label>
   <div class="row"><div><label>A value is stale after (minutes)</label><input id="stale" type="number" min="1"></div>
@@ -203,7 +204,7 @@ async function loadSettings(){
  $('hydrosOn').checked=C.hydros.on;$('hydrosUser').value=C.hydros.user;$('hydrosPass').value='';
  $('hydrosPass').placeholder=C.hydros.pass.set?'saved — leave blank to keep':'';
  const d=C.display;$('tz').value=d.tz;if($('tz').value!==d.tz){const o=new Option(d.tz,d.tz);$('tz').add(o);$('tz').value=d.tz}
- $('rotate').value=d.rotate_s;$('clock24').checked=d.clock24;$('tempF').checked=d.temp_f;$('stale').value=Math.round(d.stale_s/60);
+ $('rotate').value=d.rotate_s;$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('tempF').checked=d.temp_f;$('stale').value=Math.round(d.stale_s/60);
  $('fullEvery').value=d.full_every;$('driver').value=d.driver;
  $('ghUpd').checked=C.updates.github;$('autoUpd').checked=C.updates.auto;
  $('name').value=C.name;$('adminPass').value='';$('adminPass').placeholder=C.admin_pass.set?'set — leave blank to keep':'none';
@@ -276,7 +277,7 @@ function saveGauges(){const gauges=G.filter(g=>g.key).map(g=>({key:g.key,label:g
  warn_lo:num(g.warn_lo),warn_hi:num(g.warn_hi),alarm_lo:num(g.alarm_lo),alarm_hi:num(g.alarm_hi)}));save({pages:P,gauges})}
 
 // ── display + system
-function saveDisplay(){save({display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,temp_f:$('tempF').checked,
+function saveDisplay(){save({display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,view:$('view').value,temp_f:$('tempF').checked,
  stale_s:Math.max(1,+$('stale').value||10)*60,full_every:+$('fullEvery').value||60,driver:$('driver').value}})}
 function saveSystem(){const b={name:$('name').value.trim()};if($('adminClear').checked)b.admin_pass={clear:true};else if($('adminPass').value)b.admin_pass=$('adminPass').value;save(b)}
 
