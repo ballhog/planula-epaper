@@ -208,6 +208,10 @@ String applyJson(JsonObjectConst o) {
   if (o["admin_pass"].is<const char *>() || o["admin_pass"].is<JsonObjectConst>()) applySecret(o["admin_pass"], s.adminPass);
   // Never open on the LAN: no settings password = the setup Wi-Fi password.
   if (!s.adminPass.length() && s.apPass.length()) s.adminPass = s.apPass;
+  // Coeno mode with no Coeno address can't show anything. If Apex or Hydros is
+  // switched on, the reader obviously means direct (2026-11-06: Hydros tested
+  // ok on a new reTerminal but stayed idle because mode was still "coeno").
+  if (s.mode == "coeno" && !s.coenoHost.length() && (s.apexOn || s.hydrosOn)) s.mode = "direct";
   return "";
 }
 

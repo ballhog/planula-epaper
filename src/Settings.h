@@ -32,7 +32,7 @@ struct GaugeCfg {
 
 struct Settings {
   String name = "planula-epaper-1";  // hostname + MQTT id
-  String mode = "coeno";             // coeno | direct
+  String mode = "direct";            // coeno | direct (new panels: no Coeno address yet)
   std::vector<WifiNet> wifi;         // tried strongest-first
 
   String coenoHost;  // "" = standalone (no Coeno) until one is set; saved hosts are kept
