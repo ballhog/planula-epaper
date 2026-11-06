@@ -789,6 +789,10 @@ void setup() {
   Serial.printf("[mem] after start: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
   net::begin();
+  // The USB log is only readable with the panel in your hands (and the cable can
+  // reflash it anyway), so it's the place to recover the password from.
+  Serial.printf("Setup network %s, password %s (also the settings login: user admin, unless changed)\n",
+                net::apName().c_str(), settings::get().apPass.c_str());
   web::begin();
   coeno::onCommand(onCoenoCommand);
   draw();
