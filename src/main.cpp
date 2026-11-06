@@ -46,7 +46,13 @@ static const int PIN_BUTTON = 0;  // BOOT
 // Pages (a few kB each) and the renderer live on the loop task's stack.
 // Network calls run on the worker task (12 kB, Worker.cpp); loop() only draws
 // and serves the page. The [mem] line logs how much of each stack is unused.
+#if defined(BOARD_RETERMINAL)
+// The S3 build used all but ~670 bytes of 8 kB on its first run (2026-11-06).
+// It has RAM to spare, so give it 16 kB.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+#else
 SET_LOOP_TASK_STACK_SIZE(8 * 1024);
+#endif
 
 namespace {
 
