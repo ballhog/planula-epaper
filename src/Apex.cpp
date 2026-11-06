@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 
@@ -42,6 +43,33 @@ static bool reportsF(JsonVariantConst raw, float v, const String &unitSetting) {
   return v > 40.0f;  // no reef runs above 40 °C, so this must be °F
 }
 
+// "http://apex.local[:port]" -> "http://10.0.0.227[:port]". The ESP32's DNS
+// lookup doesn't do mDNS, so .local names fail with "connection refused"
+// (2026-11-06, the Apex's default name). Asks mDNS instead; keeps the last
+// answer for 10 min. Anything else is returned unchanged.
+static String resolveLocal(const String &url) {
+  int a = url.indexOf("://") + 3;
+  int b = a;
+  while (b < (int)url.length() && url[b] != ':' && url[b] != '/') b++;
+  String name = url.substring(a, b);
+  if (!name.endsWith(".local")) return url;
+  static String lastName;
+  static IPAddress lastIp;
+  static uint32_t lastAt = 0;
+  if (name != lastName || !lastAt || millis() - lastAt > 600000) {
+    IPAddress ip = MDNS.queryHost(name.substring(0, name.length() - 6), 3000);
+    if ((uint32_t)ip == 0) {
+      Serial.printf("[apex] mDNS: no answer for %s\n", name.c_str());
+      return url;  // let the request fail with its own error
+    }
+    if (ip != lastIp) Serial.printf("[apex] %s is %s\n", name.c_str(), ip.toString().c_str());
+    lastName = name;
+    lastIp = ip;
+    lastAt = millis();
+  }
+  return url.substring(0, a) + lastIp.toString() + url.substring(b);
+}
+
 // Returns "" on success, else an error. publish = write to readings.
 static String poll(const String &hostIn, const String &user, const String &pass, bool publish, int *count) {
   if (!WiFi.isConnected()) return "no Wi-Fi";
@@ -50,6 +78,7 @@ static String poll(const String &hostIn, const String &user, const String &pass,
   if (!host.length()) return "no Apex address set";
   if (!host.startsWith("http")) host = "http://" + host;
   while (host.endsWith("/")) host.remove(host.length() - 1);
+  host = resolveLocal(host);
 
   HTTPClient http;
   http.setTimeout(15000);
