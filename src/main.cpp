@@ -84,6 +84,7 @@ String availSource, availUrl, availSha;  // where the available build is (worker
 size_t availSize = 0;
 volatile bool autoInstallReady = false;
 uint32_t lastCheck = 0;
+volatile bool retrySoon = false;  // last check couldn't connect
 bool checkAsked = false, installAsked = false, rebootAsked = false, needsReboot = false;
 uint32_t rebootAt = 0;
 
@@ -677,6 +678,10 @@ void checkJob() {
   Serial.printf("[update] %s (8-bit largest %u)\n", updateText.get().c_str(),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   if (availBuild > 0 && settings::get().autoUpdate) autoInstallReady = true;
+  // Couldn't reach anything (e.g. DNS not ready just after joining Wi-Fi):
+  // try again in 5 min instead of 6 h.
+  if (updateText.get().indexOf("connect failed") >= 0 || updateText.get().indexOf("can't connect") >= 0)
+    retrySoon = true;
   app::redraw(false);  // footer: "update ready"
 }
 
@@ -698,7 +703,8 @@ void updates() {
   if (worker::pending("update")) return;
   // First check as soon as Wi-Fi is up, before Hydros has opened its session,
   // then every 6 h.
-  bool due = checkAsked || !lastCheck || millis() - lastCheck > 6UL * 3600UL * 1000UL;
+  uint32_t every = retrySoon ? 5UL * 60UL * 1000UL : 6UL * 3600UL * 1000UL;
+  bool due = checkAsked || !lastCheck || millis() - lastCheck > every;
   if (autoInstallReady && alarms.empty()) {
     autoInstallReady = false;
     installAsked = true;
@@ -709,6 +715,7 @@ void updates() {
   } else if (due) {
     checkAsked = false;
     lastCheck = millis();
+    retrySoon = false;
     worker::post("update", checkJob);
   }
 }

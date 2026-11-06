@@ -59,6 +59,9 @@ void stopAp() {
 
 void startServices() {
   const Settings &s = settings::get();
+  Serial.printf("[wifi] joined %s, IP %s, gateway %s, DNS %s, %d dBm\n", WiFi.SSID().c_str(),
+                WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
+                WiFi.dnsIP(0).toString().c_str(), WiFi.RSSI());
   if (!mdnsOn && MDNS.begin(s.name.c_str())) {
     MDNS.addService("http", "tcp", 80);
     MDNS.addService("calyx", "tcp", 80);
