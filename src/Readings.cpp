@@ -71,7 +71,7 @@ void update(const String &key, const char *source, const String &device, const S
     }
     r = &items[n++];
     memset(r, 0, sizeof *r);
-    nNew++;
+    nNew = nNew + 1;
     PANEL_COPY(r->key, key.c_str());
     r->slotStartMs = millis();
   }

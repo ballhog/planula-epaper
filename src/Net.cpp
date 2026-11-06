@@ -111,10 +111,16 @@ void begin() {
   }
 }
 
+// Joined AND has an address. WiFi.isConnected() turns true when the access
+// point accepts us, before DHCP has given an IP: the reTerminal's first boots
+// started services and the update check at "IP 0.0.0.0, DNS 0.0.0.0", so every
+// lookup failed.
+static bool hasIp() { return WiFi.isConnected() && (uint32_t)WiFi.localIP() != 0; }
+
 void loop() {
   if (apOn) dns.processNextRequest();
   const Settings &s = settings::get();
-  bool up = WiFi.isConnected();
+  bool up = hasIp();
   if (up) {
     if (st != State::Online) {
       st = State::Online;
@@ -151,7 +157,7 @@ void loop() {
 }
 
 State state() { return st; }
-bool online() { return WiFi.isConnected(); }
+bool online() { return hasIp(); }
 String ip() { return WiFi.isConnected() ? WiFi.localIP().toString() : (apOn ? WiFi.softAPIP().toString() : ""); }
 String apName() { return apSsid; }
 String ssid() { return WiFi.isConnected() ? WiFi.SSID() : ""; }

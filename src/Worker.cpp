@@ -133,9 +133,9 @@ bool acquire(const char *name, uint32_t waitMs) {
     Serial.printf("[tls] %s called from loop(); move it to the worker\n", name);
     waitMs = 0;
   }
-  waiters++;
+  waiters = waiters + 1;
   bool got = xSemaphoreTake(sem, pdMS_TO_TICKS(waitMs)) == pdTRUE;
-  waiters--;
+  waiters = waiters - 1;
   if (!got) {
     Serial.printf("[tls] %s gave up waiting for %s\n", name, who);
     return false;

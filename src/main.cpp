@@ -495,6 +495,7 @@ void onCoenoCommand(const String &leaf, const String &payload) {
   else if (leaf == "ack") { acked = true; app::redraw(false); }
 }
 
+#if !defined(BOARD_RETERMINAL)  // the reTerminal has its own keys, below
 // ── button ──────────────────────────────────────────────────────────────
 uint32_t pressedAt = 0;
 bool wasDown = false, longDone = false;
@@ -543,6 +544,8 @@ void button() {
   }
   wasDown = down;
 }
+
+#endif
 
 #if defined(BOARD_RETERMINAL)
 // ── reTerminal E1001 keys (Seeed: KEY0 GPIO3 right/green, KEY1 GPIO4 middle,
