@@ -176,7 +176,7 @@ Pins from Seeed's docs; whole frame in PSRAM; own firmware image (`planula-epape
 Planned once the unit is here (decided 2026-10-29):
 
 - **Buttons (built, build after 2026-11-06)**: left / right = previous / next page; middle = acknowledge the alarm, else switch the view (number + trend → graphs → numbers only, saved; also under Display). Middle hold 3 s = System screen, 10 s = setup network; left + right held 10 s = erase settings. Pins from Seeed: KEY0 GPIO3 right, KEY1 GPIO4 middle, KEY2 GPIO5 left, active low. Views: `docs/screens/15-…`, `16-…`, `17-…`.
-- **Power modes** (Settings):
+- **Power modes** (built 2026-11-06, `src/Power.*`; Display → Power, reTerminal only):
   - **Live**: wall power, as today.
   - **Saver**: wake every few minutes; redraw only when a value moves more than a step (pH 0.02, temp 0.1°, salinity 0.1 ppt, ORP 5 mV) or a status changes, and at least hourly. Shows "updated 10:40", not a running clock.
   - **Daily**: one update a day at a set time, plus any button press, plus an **hourly alarm check**: wake for a few seconds, compare against alarm limits, sleep again without touching the screen unless something is out of range (then redraw with the alarm tile and beep). The screen says plainly how old the readings are ("Readings from 7:00 this morning").

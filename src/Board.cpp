@@ -72,7 +72,7 @@ void readAll() {
     roomRh = h;
     // Inside the case, next to the ESP32: reads a little warm when awake.
     readings::update("panel:room-temp", "Panel", s.name, "Room temperature", "temp", "°C", t);
-    readings::update("panel:room-rh", "Panel", s.name, "Room humidity", "humidity", "%", h);
+    readings::update("panel:room-rh", "Panel", s.name, "Room humidity", "rh", "%", h);
   }
   readBattery();
   if (pct >= 0) readings::update("panel:battery", "Panel", s.name, "Panel battery", "battery", "%", pct);

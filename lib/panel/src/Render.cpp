@@ -234,7 +234,8 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
   } else {
     char meta[40], age[16];
     formatAge(g.age_s, age, sizeof age);
-    if (g.src[0] && w >= 360) snprintf(meta, sizeof meta, "%s · %s", g.src, age);
+    if (g.age_s == kNoAge) snprintf(meta, sizeof meta, "%s", w >= 240 ? g.src : "");
+    else if (g.src[0] && w >= 360) snprintf(meta, sizeof meta, "%s · %s", g.src, age);
     else snprintf(meta, sizeof meta, "%s", age);
     rightW = drawText(d, font::Small, x + w - pad, ly, meta, fg, Right);
   }

@@ -33,6 +33,7 @@
 #include "Web.h"
 #include "Worker.h"
 #include "Board.h"
+#include "Power.h"
 #include "ota.h"
 
 #ifndef FW_BUILD
@@ -116,6 +117,8 @@ bool fetchPage(int i, panel::Page &p) {
   if (!coenoMode()) {
     direct::build(i, p);
     p.view = panel::viewFromName(settings::get().view.c_str());
+    if (power::sleepy())  // ages would freeze on screen: the footer gives the time
+      for (int k = 0; k < p.n; k++) p.g[k].age_s = panel::kNoAge;
     return true;
   }
   uint32_t at;
@@ -129,6 +132,7 @@ bool fetchPage(int i, panel::Page &p) {
     panel::Gauge &g = p.g[k];
     g.age_s += pageAge;
     if (g.has && g.age_s > staleAfter && g.status != panel::Status::Alarm) g.status = panel::Status::Stale;
+    if (power::sleepy()) g.age_s = panel::kNoAge;
   }
   return true;
 }
@@ -174,7 +178,7 @@ void collectAlarms() {
 
 void fillChrome(panel::Chrome &c) {
   const Settings &s = settings::get();
-  PANEL_COPY(c.clock, clockText().c_str());
+  PANEL_COPY(c.clock, power::sleepy() ? "" : clockText().c_str());  // no frozen clock on battery
   c.page = curPage;
   c.pages = nPages;
   if (!alarms.empty()) {
@@ -212,6 +216,13 @@ void fillChrome(panel::Chrome &c) {
   if (net::online()) right = "Wi-Fi " + String(net::rssi()) + " dBm";
   else right = "Wi-Fi offline";
   if (board::batteryPct() >= 0) right += " · battery " + String(board::batteryPct()) + "%";
+  if (power::sleepy()) {
+    // The screen is a snapshot: say when it was taken and when the next one is.
+    String at = clockText(), nx = power::nextWakeText();
+    String head = at.length() ? "Readings from " + at : String("Readings");
+    if (nx.length()) head += " · next " + nx;
+    left = head + " · " + left;
+  }
   if (availBuild > 0 && coenoLinked()) right += " · update ready, hold 3 s";
   PANEL_COPY(c.footerLeft, left.c_str());
   PANEL_COPY(c.footerRight, right.c_str());
@@ -587,6 +598,7 @@ void keysBegin() {
 void keys() {
   uint32_t now = millis();
   bool eR = readKey(keyRight, now), eM = readKey(keyMid, now), eL = readKey(keyLeft, now);
+  if (eR || eM || eL) power::touch();
   if (eR || eM || eL)
     Serial.printf("[keys] left %s, middle %s, right %s\n", keyLeft.down ? "down" : "up", keyMid.down ? "down" : "up",
                   keyRight.down ? "down" : "up");
@@ -799,6 +811,7 @@ void installJob() {
 // take the TLS token, so a running Hydros session steps aside on its own.
 void updates() {
   if (!net::online()) return;
+  if (power::quiet()) return;  // a few-second battery wake: no GitHub check
   if (worker::pending("update")) return;
   // First check as soon as Wi-Fi is up, before Hydros has opened its session,
   // then every 6 h.
@@ -867,6 +880,26 @@ String alarmsJson() {
   return s;
 }
 bool alarmAcked() { return acked; }
+bool currentPage(panel::Page &p) { return fetchPage(curPage, p); }
+void drawNow() {
+  collectAlarms();
+  fullAsked = true;
+  lastDraw = millis();
+  redrawAsked = false;
+  draw();
+}
+uint32_t alarmSig() {
+  uint32_t h = 2166136261u;
+  for (auto &a : alarms)
+    for (char ch : a.id) h = (h ^ (uint8_t)ch) * 16777619u;
+  return alarms.empty() ? 0 : h;
+}
+void syncAlarms(bool wasAcked, uint32_t ackedSig) {
+  collectAlarms();
+  if (wasAcked && ackedSig && alarmSig() == ackedSig) acked = true;
+  flashAsked = false;  // no flash on a battery wake
+}
+bool updating() { return updatingFrom != nullptr; }
 void identify() {
   identifyAsked = true;
   redrawAsked = true;
@@ -892,6 +925,10 @@ void setup() {
   pinMode(PIN_BUTTON, INPUT_PULLUP);
 #endif
   settings::load();
+  power::begin();
+#if defined(BOARD_RETERMINAL)
+  keysBegin();  // again: power::begin() handed the keys back from their sleep (RTC) setup
+#endif
   Serial.printf("\nPlanula-ePaper build %d (%s), name %s, mode %s\n", FW_BUILD, FW_VERSION,
                 settings::get().name.c_str(), settings::get().mode.c_str());
   display::begin(settings::get().panelDriver);
@@ -907,7 +944,7 @@ void setup() {
                 net::apName().c_str(), settings::get().apPass.c_str());
   web::begin();
   coeno::onCommand(onCoenoCommand);
-  draw();
+  if (!power::quiet()) draw();  // a timer wake keeps the old picture until power decides
 }
 
 void loop() {
@@ -933,6 +970,7 @@ void loop() {
     if (curPage >= nPages) curPage = 0;
     redrawAsked = true;
   }
+  power::loop();  // after the page count: it may restore the page from before a sleep
   uint16_t rot = coenoMode() && coeno::rotateSeconds() ? coeno::rotateSeconds() : settings::get().rotate_s;
   if (rot && nPages > 1 && now - lastRotate > rot * 1000UL && alarms.empty()) {
     lastRotate = now;
@@ -974,6 +1012,7 @@ void loop() {
     seenKeys = readings::newKeys();
     redrawAsked = true;
   }
+  if (power::quiet()) redrawAsked = false;  // power draws at most once per timer wake
   if (redrawAsked && now - lastDraw > 400) {
     redrawAsked = false;
     lastDraw = now;
@@ -981,7 +1020,7 @@ void loop() {
     draw();
   }
   // Alarm reminder: one short flash every 5 min until acknowledged.
-  if (!alarms.empty() && !acked && now - lastReminder > 300000UL) {
+  if (!alarms.empty() && !acked && !power::sleepy() && now - lastReminder > 300000UL) {
     lastReminder = now;
     display::flash(1);
   }

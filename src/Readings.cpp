@@ -161,4 +161,16 @@ String unitFor(const String &kind) {
   return "";
 }
 
+void restore(const Reading &in) {
+  Lock l;
+  for (int i = 0; i < n; i++)
+    if (!strcmp(items[i].key, in.key)) {
+      items[i] = in;
+      return;
+    }
+  if (n >= kMax) return;
+  items[n++] = in;
+  nNew = nNew + 1;
+}
+
 }  // namespace readings

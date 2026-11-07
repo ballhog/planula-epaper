@@ -52,7 +52,7 @@ struct Gauge {
   bool hasSparkRange = false;
   float sparkLo = 0, sparkHi = 0;
   Status status = Status::Missing;
-  uint32_t age_s = 0;    // age of the value when the page was built
+  uint32_t age_s = 0;    // age of the value when the page was built (kNoAge: don't show)
   uint8_t nspark = 0;    // sparkline points, oldest first
   float spark[kSparkLen];
   // Timeline lanes only: spark[i] is the value at t[i] (minutes from the page's
@@ -87,6 +87,8 @@ void dayWindow(Page &p);
 float laneValueAt(const Gauge &g, float t);
 
 // Everything around the gauges: header, footer, alarm banner.
+constexpr uint32_t kNoAge = 0xFFFFFFFFu;  // battery snapshot: the footer gives the time
+
 struct Chrome {
   char clock[8] = "";        // "08:41", empty if time unknown
   uint8_t page = 0, pages = 1;

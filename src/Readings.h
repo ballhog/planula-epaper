@@ -51,6 +51,8 @@ bool get(const String &key, Reading &out);
 int count();
 bool at(int i, Reading &out);
 void clearSource(const char *source);
+// Put back a reading saved across deep sleep (times already rebased to millis()).
+void restore(const Reading &r);
 
 // Kind from a controller's type/name ("Tmp" → temp, "Salt" → cond, ...).
 String guessKind(const String &type, const String &name);

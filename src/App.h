@@ -2,6 +2,8 @@
 #pragma once
 #include <Arduino.h>
 
+#include "Model.h"
+
 namespace app {
 
 int page();
@@ -24,5 +26,14 @@ void installUpdateSoon();
 void rebootSoon();
 bool rebootNeeded();
 void setRebootNeeded();
+
+// For power (battery modes):
+bool currentPage(panel::Page &p);  // the page on screen, freshly built
+void drawNow();                    // collect alarms and draw at once (full refresh)
+uint32_t alarmSig();               // hash of the alarm ids now showing
+// After a deep-sleep wake: re-collect alarms and keep "acknowledged" if the
+// same alarms were acknowledged before the sleep.
+void syncAlarms(bool wasAcked, uint32_t ackedSig);
+bool updating();                   // a firmware download/install is running
 
 }  // namespace app

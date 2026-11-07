@@ -41,5 +41,7 @@ void bmpHeader(uint8_t out[62]);  // 1-bit BMP header + palette
 const uint8_t *row(int y);        // one 100-byte row of the frame (1 = ink); redraws its band
 // Ask for a full refresh with the next show().
 void requestFull();
+// Before deep sleep: panel controller off (the picture stays).
+void sleep();
 
 }  // namespace display

@@ -52,6 +52,11 @@ struct Settings {
 
   String tz = "EST5EDT,M3.2.0,M11.1.0";  // POSIX TZ (America/Detroit)
   bool clock24 = false;
+  // Battery power (reTerminal; see Power.h): live | saver | daily.
+  String power = "live";
+  uint16_t saverMin = 10;
+  String dailyAt = "07:00";
+  bool hourlyCheck = true;
   String view = "both";  // both | numbers | graphs (tile view; a button cycles it on the reTerminal)
   bool tempF = false;        // direct mode: show temperatures in °F
   uint16_t rotate_s = 0;     // 0 = pages only change with the button

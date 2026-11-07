@@ -69,6 +69,16 @@ void toJson(JsonObject o, bool with) {
   h["on"] = s.hydrosOn;
   h["user"] = s.hydrosUser;
   secret(h, "pass", s.hydrosPass, with);
+  JsonObject pw = o["power"].to<JsonObject>();
+  pw["mode"] = s.power;
+  pw["every_min"] = s.saverMin;
+  pw["daily_at"] = s.dailyAt;
+  pw["hourly_check"] = s.hourlyCheck;
+#if defined(BOARD_RETERMINAL)
+  pw["battery"] = true;  // this board can run on its battery
+#else
+  pw["battery"] = false;
+#endif
   JsonObject d = o["display"].to<JsonObject>();
   d["tz"] = s.tz;
   d["clock24"] = s.clock24;
@@ -162,6 +172,19 @@ String applyJson(JsonObjectConst o) {
     if (h["on"].is<bool>()) s.hydrosOn = h["on"];
     if (h["user"].is<const char *>()) s.hydrosUser = h["user"].as<const char *>();
     applySecret(h["pass"], s.hydrosPass);
+  }
+  if (o["power"].is<JsonObjectConst>()) {
+    JsonObjectConst pw = o["power"];
+    if (pw["mode"].is<const char *>()) {
+      String m = pw["mode"].as<const char *>();
+      if (m == "live" || m == "saver" || m == "daily") s.power = m;
+    }
+    if (pw["every_min"].is<int>()) s.saverMin = constrain((int)pw["every_min"], 2, 240);
+    if (pw["daily_at"].is<const char *>()) {
+      String t = pw["daily_at"].as<const char *>();
+      if (t.length() == 5 && t[2] == ':' && t.substring(0, 2).toInt() < 24 && t.substring(3).toInt() < 60) s.dailyAt = t;
+    }
+    if (pw["hourly_check"].is<bool>()) s.hourlyCheck = pw["hourly_check"];
   }
   if (o["display"].is<JsonObjectConst>()) {
     JsonObjectConst d = o["display"];

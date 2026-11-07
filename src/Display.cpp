@@ -131,6 +131,10 @@ void flash(int times) {
 }
 
 void requestFull() { fullAsked = true; }
+
+void sleep() {
+  if (epd) epd->hibernate();
+}
 uint32_t refreshes() { return nRefresh; }
 uint32_t fullRefreshes() { return nFull; }
 

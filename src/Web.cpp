@@ -4,6 +4,7 @@
 
 #include "Worker.h"
 #include "Board.h"
+#include "Power.h"
 
 #include <ArduinoJson.h>
 #include <WebServer.h>
@@ -47,6 +48,7 @@ bool authed() {
 }
 
 bool allowed() {
+  power::touch();  // someone is using the page: a battery panel stays awake
   if (authed()) return true;
   server.requestAuthentication(BASIC_AUTH, "Planula panel", "Password needed");
   return false;
@@ -134,6 +136,7 @@ void handleStatus() {
   h["text"] = hydros::status();
   d["board_text"] = board::status();  // room sensor + battery (reTerminal)
   d["battery_pct"] = board::batteryPct();
+  d["power_text"] = power::status();
   d["page"] = app::page();
   d["pages"] = app::pages();
   d["alarms"] = serialized(app::alarmsJson());
