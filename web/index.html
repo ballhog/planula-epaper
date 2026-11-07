@@ -267,11 +267,11 @@ let OL=[],OA=[];
 async function loadOutlets(){try{OA=await get('/api/outlets')}catch(e){OA=[]}drawOutlets()}
 function drawOutlets(){const all=$('olHidden').checked;const picked=k=>OL.findIndex(o=>o.key===k);
  const list=OA.filter(o=>all||!o.hidden||picked(o.key)>=0);
- for(const o of OL)if(!list.find(x=>x.key===o.key))list.push({key:o.key,name:o.key.split(':').slice(1).join(':'),source:'',state:'not seen yet'});
+ for(const o of OL)if(!list.find(x=>x.key===o.key))list.push({key:o.key,name:o.key.split(':').slice(1).join(':').split('/').pop(),source:'',state:'not seen yet'});
  $('outlets').innerHTML=list.length?list.map(o=>{const i=picked(o.key);const lab=i>=0?(OL[i].label||''):'';
   return `<div class="row" style="align-items:center"><label style="flex:2"><input type="checkbox" ${i>=0?'checked':''} onchange="pickOutlet('${esc(o.key)}',this.checked)"> ${esc(o.name)} <span class="hint">${esc(o.source||'')} ${esc(o.type||'')} · ${esc(o.state||'')}${i>=0?' · lane '+(i+1):''}</span></label>
   <input style="flex:1" placeholder="label" value="${esc(lab)}" ${i>=0?'':'disabled'} oninput="labelOutlet('${esc(o.key)}',this.value)"></div>`}).join('')
-  :'<p class="hint">No outlets yet: they show up after the first Apex read (Hydros outlets come in a later build).</p>'}
+  :'<p class="hint">No outlets yet: they show up after the first Apex or Hydros reading.</p>'}
 function pickOutlet(k,on){const i=OL.findIndex(o=>o.key===k);if(on&&i<0){if(OL.length>=8){alert('Up to 8 outlets');drawOutlets();return}OL.push({key:k,label:''})}
  if(!on&&i>=0)OL.splice(i,1);drawOutlets()}
 function labelOutlet(k,v){const o=OL.find(o=>o.key===k);if(o)o.label=v}

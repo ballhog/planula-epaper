@@ -62,9 +62,15 @@ void record(Hist &h, bool on) {
 
 }  // namespace
 
+// "apex:Return" -> "Return"; "hydros:<controller>/1RTunzeSmp" -> "1RTunzeSmp".
 const char *nameOf(const char *key) {
   const char *c = strchr(key, ':');
-  return c ? c + 1 : key;
+  c = c ? c + 1 : key;
+  if (!strncmp(key, "hydros:", 7)) {
+    const char *sl = strchr(c, '/');
+    if (sl) c = sl + 1;
+  }
+  return c;
 }
 
 void update(const char *key, const char *source, const char *type, bool on, bool manual, bool hidden) {

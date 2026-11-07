@@ -15,6 +15,7 @@
 #include "SigV4.h"
 #include "WsTransport.h"
 #include "Worker.h"
+#include "Outlets.h"
 #include "miniz.h"
 
 namespace hydros {
@@ -306,6 +307,14 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
   filter["Input"]["*"]["probeValue"] = true;
   filter["Input"]["*"]["senseValue"] = true;
   filter["Input"]["*"]["i10Value"] = true;
+  // Outputs (seen 2026-11-06): "Output":{"<name>":{"valueState":0..10000
+  // (0-100 %), "override":bool, ...}}; dosing heads also carry "rpm", the
+  // water-change pair "drainvalueState"/"fillvalueState".
+  filter["Output"]["*"]["valueState"] = true;
+  filter["Output"]["*"]["override"] = true;
+  filter["Output"]["*"]["rpm"] = true;
+  filter["Output"]["*"]["drainvalueState"] = true;
+  filter["Output"]["*"]["fillvalueState"] = true;
   JsonDocument doc;
   DeserializationError err;
   long inflLen = -1;
@@ -375,6 +384,16 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     if (isnan(v)) continue;
     if (kind == "temp" && v > 50.0f) v = (v - 32.0f) * 5.0f / 9.0f;  // US accounts report °F
     readings::update("hydros:" + thing + "/" + name, "Hydros", device, name, kind, readings::unitFor(kind), v);
+  }
+  for (JsonPairConst kv : doc["Output"].as<JsonObjectConst>()) {
+    JsonObjectConst o = kv.value().as<JsonObjectConst>();
+    float v = numberOf(o["valueState"]);
+    float dr = numberOf(o["drainvalueState"]), fi = numberOf(o["fillvalueState"]);
+    if (isnan(v) && isnan(dr) && isnan(fi)) continue;
+    bool on = (!isnan(v) && v > 0) || (!isnan(dr) && dr > 0) || (!isnan(fi) && fi > 0);
+    const char *type = !o["rpm"].isNull() ? "doser" : !isnan(dr) || !isnan(fi) ? "wc" : "output";
+    String key = "hydros:" + thing + "/" + kv.key().c_str();
+    outlets::update(key.c_str(), "Hydros", type, on, o["override"] | false, false);
   }
 }
 
