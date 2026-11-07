@@ -36,6 +36,7 @@ struct Resolved {
   uint32_t magic;
   char name[40];
   uint32_t ip;
+  uint32_t atS;  // when mDNS answered (epoch s): asked again after an hour
 };
 RTC_DATA_ATTR static Resolved known;
 constexpr uint32_t kKnownMagic = 0xA9E70001;
@@ -73,7 +74,9 @@ static String resolveLocal(const String &url) {
   while (b < (int)url.length() && url[b] != ':' && url[b] != '/') b++;
   String name = url.substring(a, b);
   if (!name.endsWith(".local")) return url;
-  if (known.magic != kKnownMagic || strcmp(known.name, name.c_str()) || !known.ip) {
+  uint32_t nowS = (uint32_t)time(nullptr);
+  bool old = nowS > 1700000000 && (known.atS > nowS || nowS - known.atS > 3600);
+  if (known.magic != kKnownMagic || strcmp(known.name, name.c_str()) || !known.ip || old) {
     IPAddress ip = MDNS.queryHost(name.substring(0, name.length() - 6), 3000);
     if ((uint32_t)ip == 0) {
       plog.printf("[apex] mDNS: no answer for %s\n", name.c_str());
@@ -83,6 +86,7 @@ static String resolveLocal(const String &url) {
     known.magic = kKnownMagic;
     strlcpy(known.name, name.c_str(), sizeof known.name);
     known.ip = (uint32_t)ip;
+    known.atS = nowS;
   }
   return url.substring(0, a) + IPAddress(known.ip).toString() + url.substring(b);
 }
@@ -110,7 +114,9 @@ static String poll(const String &hostIn, const String &user, const String &pass,
   }
   if (code != 200) {
     http.end();
-    if (code < 0) known.ip = 0;  // ask mDNS again next time
+    // Not the Apex answering (or nobody): ask mDNS again next time; the
+    // address may have moved to another device.
+    known.ip = 0;
     return code < 0 ? String("can't reach Apex (") + http.errorToString(code) + ")" : "HTTP " + String(code);
   }
 
@@ -220,6 +226,7 @@ static int eachRecord(const String &url, const String &user, const String &pass,
   if (code != 200) {
     http.end();
     err = "HTTP " + String(code);
+    known.ip = 0;
     return -1;
   }
   Stream &st = http.getStream();
@@ -231,14 +238,22 @@ static int eachRecord(const String &url, const String &user, const String &pass,
   int n = 0;
   JsonDocument doc;
   uint32_t t0 = millis();
-  while (millis() - t0 < 60000) {
+  bool done = false;
+  while (millis() - t0 < 40000) {
     int c = -1;
     uint32_t w = millis();
     while ((c = st.peek()) == ' ' || c == ',' || c == '\n' || c == '\r' || c == '\t' || (c < 0 && millis() - w < 8000)) {
       if (c < 0) delay(5);
       else st.read();
     }
-    if (c != '{') break;  // ']' (end) or the stream ended
+    if (c == ']') {
+      done = true;  // the whole log arrived
+      break;
+    }
+    if (c != '{') {
+      err = c < 0 ? "reply stopped" : "unexpected reply";
+      break;
+    }
     DeserializationError e = deserializeJson(doc, st, DeserializationOption::Filter(filter));
     if (e) {
       err = String("bad record: ") + e.c_str();
@@ -247,6 +262,7 @@ static int eachRecord(const String &url, const String &user, const String &pass,
     fn(doc.as<JsonObjectConst>());
     n++;
   }
+  if (!done && !err.length()) err = "timed out";
   http.end();
   return n;
 }
@@ -254,7 +270,11 @@ static int eachRecord(const String &url, const String &user, const String &pass,
 static void readLogs(const String &host, const String &user, const String &pass) {
   uint32_t nowS = (uint32_t)time(nullptr);
   if (nowS < 1700000000) return;
-  const Settings &s = settings::get();
+  // Copies: a settings save on the loop may replace these while this runs.
+  String tempUnit = settings::get().apexTempUnit;
+  std::vector<String> picked;
+  for (auto &o : settings::get().outlets)
+    if (o.key.startsWith("apex:")) picked.push_back(o.key);
   uint32_t t0 = millis();
 
   // Inputs: per-reading sums for each 30-min slot of the last 24 h.
@@ -264,14 +284,19 @@ static void readLogs(const String &host, const String &user, const String &pass)
     float sum[kSlots];
     uint16_t n[kSlots];
   };
-  int nk = readings::count();
-  std::unique_ptr<Acc[]> acc(new (std::nothrow) Acc[nk > 0 ? nk : 1]);
+  int nk = readings::count(), napex = 0;
+  for (int i = 0; i < nk; i++) {
+    readings::Reading r;
+    if (readings::at(i, r) && !strncmp(r.key, "apex:", 5)) napex++;
+  }
+  if (!napex) return;
+  std::unique_ptr<Acc[]> acc(new (std::nothrow) Acc[napex]);
   if (!acc) {
     plog.println("[apex] input log: no memory");
     return;
   }
   int na = 0;
-  for (int i = 0; i < nk; i++) {
+  for (int i = 0; i < nk && na < napex; i++) {
     readings::Reading r;
     if (!readings::at(i, r) || strncmp(r.key, "apex:", 5)) continue;
     Acc &a = acc[na++];
@@ -302,7 +327,7 @@ static void readLogs(const String &host, const String &user, const String &pass)
         if (strcmp(acc[i].key, key)) continue;
         float v = parseValue(d["value"]);
         if (isnan(v)) break;
-        if (!strcmp(acc[i].kind, "temp") && reportsF(d["value"], v, s.apexTempUnit)) v = (v - 32.0f) * 5.0f / 9.0f;
+        if (!strcmp(acc[i].kind, "temp") && reportsF(d["value"], v, tempUnit)) v = (v - 32.0f) * 5.0f / 9.0f;
         acc[i].sum[k] += v;
         acc[i].n[k]++;
         break;
@@ -311,7 +336,10 @@ static void readLogs(const String &host, const String &user, const String &pass)
   }, err);
   int filled = 0;
   float pts[kSlots];
-  for (int i = 0; i < na; i++) {
+  // Only a whole, current log replaces the trend: a cut-off read lacks the
+  // newest records, and carrying the last value forward would draw them flat.
+  bool usable = !err.length() && newest && nowS - newest < 45 * 60;
+  for (int i = 0; usable && i < na; i++) {
     int np = rules::slotPoints(acc[i].sum, acc[i].n, kSlots, pts);
     if (np >= 2 && readings::setHistory(acc[i].key, pts, np, 0)) filled++;
   }
@@ -327,13 +355,12 @@ static void readLogs(const String &host, const String &user, const String &pass)
     uint8_t lvl[46];
   };
   std::vector<Ev> evs;
-  for (auto &o : s.outlets)
-    if (o.key.startsWith("apex:")) {
-      Ev e;
-      memset(&e, 0, sizeof e);
-      strlcpy(e.key, o.key.c_str(), sizeof e.key);
-      evs.push_back(e);
-    }
+  for (auto &k : picked) {
+    Ev e;
+    memset(&e, 0, sizeof e);
+    strlcpy(e.key, k.c_str(), sizeof e.key);
+    evs.push_back(e);
+  }
   if (!evs.empty()) {
     JsonDocument g;
     g["date"] = true;
@@ -362,11 +389,11 @@ static void readLogs(const String &host, const String &user, const String &pass)
     }, err);
     int lanes = 0;
     for (auto &e : evs)
-      if (e.n && outlets::setHistory(e.key, e.at, e.lvl, e.n)) lanes++;
+      if (!err.length() && e.n && outlets::setHistory(e.key, e.at, e.lvl, e.n)) lanes++;
     plog.printf("[apex] output log: %d records, %d changes for %d picked output(s)%s%s\n", orecs, changes, lanes,
                   err.length() ? ", " : "", err.c_str());
   }
-  logsAtS = nowS;
+  logsAtS = usable ? nowS : nowS - kLogsEveryS + 300;  // a failed read tries again in 5 min
   plog.printf("[apex] logs read in %lu ms\n", (unsigned long)(millis() - t0));
 }
 
@@ -390,7 +417,10 @@ static void pollJob(String host, String user, String pass) {
   }
   okNow = good;
   uint32_t nowS = (uint32_t)time(nullptr);
-  if (good && nowS > 1700000000 && (!logsAtS || nowS - logsAtS >= kLogsEveryS || logsAtS > nowS)) readLogs(host, user, pass);
+  // Its own job, so a Hydros renewal or an update check queued meanwhile
+  // isn't held up behind it.
+  if (good && nowS > 1700000000 && (!logsAtS || nowS - logsAtS >= kLogsEveryS || logsAtS > nowS))
+    worker::post("apex-logs", [host, user, pass] { readLogs(host, user, pass); });
 }
 
 void loop() {

@@ -56,6 +56,7 @@ String lastLogged;
 // Session built from saved credentials: if it never connects they're dropped.
 bool fromCache = false;
 volatile bool sawConnect = false;
+volatile bool mqttRefused = false;  // AWS refused the MQTT CONNECT
 time_t credExp = 0;  // when the session's AWS credentials run out (0 unknown)
 // The Cognito id token (an hour), for the REST calls made while the session
 // holds the TLS token (the dosing log). Saved with the sign-in.
@@ -575,6 +576,7 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
       }
       break;
     case MQTT_EVENT_ERROR:
+      if (e->error_handle && e->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) mqttRefused = true;
       if (e->error_handle)
         plog.printf("[hydros] AWS IoT error: type %d, tls 0x%x, errno %d, refused %d\n",
                       (int)e->error_handle->error_type, (unsigned)e->error_handle->esp_tls_last_esp_err,
@@ -686,14 +688,17 @@ void readDoseLogs() {
   uint32_t nowS = (uint32_t)time(nullptr);
   if (!idTok.length() || nowS + 60 > idTokExp) return;  // next real login brings a token
   if (doseLogsAtS && nowS - doseLogsAtS < 30 * 60 && doseLogsAtS <= nowS) return;
-  doseLogsAtS = nowS;
-  const Settings &s = settings::get();
-  for (auto &o : s.outlets) {
-    if (!o.key.startsWith("hydros:")) continue;
-    if (!outlets::isDoser(o.key.c_str())) continue;  // only dosing heads have a dosing log
-    int sl = o.key.indexOf('/');
+  // Copy what's needed first: a settings save on the loop can replace the
+  // outlets list while this runs (it would free the vector under us).
+  std::vector<String> keys;
+  for (auto &o : settings::get().outlets)
+    if (o.key.startsWith("hydros:") && outlets::isDoser(o.key.c_str())) keys.push_back(o.key);
+  if (keys.empty()) return;  // not known yet: the first status tells which heads dose
+  int ok = 0;
+  for (const String &key : keys) {
+    int sl = key.indexOf('/');
     if (sl < 0) continue;
-    String thing = o.key.substring(7, sl), name = o.key.substring(sl + 1);
+    String thing = key.substring(7, sl), name = key.substring(sl + 1);
     char q[48];
     snprintf(q, sizeof q, "&count=60&start=%llu", (unsigned long long)(nowS - 24UL * 3600UL) * 1000ULL);
     String url = String(kApi) + "/logs?thingName=" + sigv4::uriEncode(thing.c_str()).c_str() +
@@ -710,35 +715,30 @@ void readDoseLogs() {
       plog.printf("[hydros] dosing log for %s: HTTP %d %s\n", name.c_str(), r.status, r.error.c_str());
       continue;
     }
-    JsonArrayConst arr = d.as<JsonArrayConst>();
-    int total = arr.size(), m = 0;
-    if (total > 60) total = 60;
+    ok++;
     uint32_t at[60];
     float ml[60];
-    // Newest first in the reply: fill from the back so the arrays run oldest first.
-    for (JsonObjectConst rec : arr) {
-      if (m >= total) break;
+    int m = 0;
+    for (JsonObjectConst rec : d.as<JsonArrayConst>()) {
+      if (m >= 60) break;
       double t = rec["time"].is<double>() ? rec["time"].as<double>() : strtod(rec["time"] | "0", nullptr);
       if (t < 1.7e12) continue;
       at[m] = (uint32_t)(t / 1000.0);
       ml[m] = doseMl(rec);
       m++;
     }
-    for (int i = 0; i < m / 2; i++) {
-      std::swap(at[i], at[m - 1 - i]);
-      std::swap(ml[i], ml[m - 1 - i]);
-    }
-    // Keep oldest-first order even if the reply wasn't sorted.
+    // Oldest first (the reply is newest first, but don't rely on it).
     for (int i = 1; i < m; i++)
       for (int j = i; j > 0 && at[j - 1] > at[j]; j--) {
         std::swap(at[j - 1], at[j]);
         std::swap(ml[j - 1], ml[j]);
       }
-    bool set = m && outlets::setDoses(o.key.c_str(), at, ml, m);
-    plog.printf("[hydros] dosing log for %s: %d dose(s) in 24 h%s%s\n", name.c_str(), m,
-                  m ? ", last " : "", m ? (String(ml[m - 1], 1) + " mL").c_str() : "");
+    bool set = m && outlets::setDoses(key.c_str(), at, ml, m);
+    plog.printf("[hydros] dosing log for %s: %d dose(s) in 24 h%s%s\n", name.c_str(), m, m ? ", last " : "",
+                m ? (String(ml[m - 1], 1) + " mL").c_str() : "");
     if (!set && m) plog.printf("[hydros] (not shown: %s isn't on the Outlets page)\n", name.c_str());
   }
+  if (ok) doseLogsAtS = nowS;  // failures try again at the next login
 }
 
 void loginJob(String user, String pass, uint8_t g) {
@@ -790,6 +790,8 @@ void loginFinished(uint32_t now) {
   }
   holdsTls = true;
   sawConnect = false;
+  mqttRefused = false;
+  wst::takeRefused();
   plog.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s (request %u bytes)\n",
                 (unsigned)things.size(), things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str(),
                 (unsigned)wsPath.length());
@@ -838,7 +840,10 @@ void loop() {
     bool silent = connected && sinceMsg > (int32_t)kSilentMs;
     bool dropped = !connected && sinceStart > 30000;
     if (expired || silent || dropped) {
-      if (dropped && fromCache && !sawConnect) {
+      // Only a refusal by the server means the saved credentials are bad; a
+      // dead network says nothing about them.
+      bool refused = wst::takeRefused() || mqttRefused;
+      if (dropped && fromCache && !sawConnect && refused) {
         plog.println("[hydros] saved AWS credentials refused; signing in again");
         forgetCreds();
         fromCache = false;
@@ -881,6 +886,14 @@ void loop() {
 void reserve() {
   if (!inflater.ready())
     plog.printf("[hydros] couldn't reserve inflate memory (largest block %u)\n", (unsigned)ESP.getMaxAllocHeap());
+}
+
+void forgetSaved() {
+  forgetAll();
+  fromCache = false;
+  credExp = 0;
+  idTok = "";
+  idTokExp = 0;
 }
 
 void restart() {

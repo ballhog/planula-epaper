@@ -14,5 +14,8 @@ namespace wst {
 // path = "/mqtt?X-Amz-..." (sent as-is). Hand the handle to esp-mqtt as
 // cfg.network.transport; esp-mqtt destroys it with the client.
 esp_transport_handle_t create(const char *path, const char *subprotocol);
+// The server answered the upgrade with something other than 101 (e.g. 403:
+// the signed URL / credentials were refused) since the last call. Clears it.
+bool takeRefused();
 
 }  // namespace wst

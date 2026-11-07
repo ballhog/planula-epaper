@@ -18,6 +18,7 @@ namespace hydros {
 
 void loop();
 void restart();     // drop the session; loop() logs in again
+void forgetSaved(); // drop the saved sign-in (credentials changed, Hydros off)
 void reserve();     // grab the inflate buffers early, before the heap fragments
 // Login + list controllers. Blocking: call it from the worker task. A live
 // session steps aside while it runs (one TLS connection at a time).

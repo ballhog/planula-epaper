@@ -156,6 +156,7 @@ void handleGetSettings() {
   if (!allowed()) return;
   JsonDocument d;
   settings::toJson(d.to<JsonObject>(), false);
+  d["display"]["room_sensor"] = !isnan(board::roomC());  // reTerminal with a working SHT4x
   sendJson(200, d);
 }
 
@@ -179,6 +180,10 @@ void handlePostSettings() {
   if (before.panelDriver != s.panelDriver) app::setRebootNeeded();
   if (before.hydrosUser != s.hydrosUser || before.hydrosPass != s.hydrosPass || before.hydrosOn != s.hydrosOn ||
       before.mode != s.mode) {
+    // A new e-mail or password (or Hydros off) must not ride on the saved
+    // sign-in, and keys for an account no longer used shouldn't stay in flash.
+    if (before.hydrosUser != s.hydrosUser || before.hydrosPass != s.hydrosPass || before.hydrosOn != s.hydrosOn)
+      hydros::forgetSaved();
     hydros::restart();
     if (!s.hydrosOn) readings::clearSource("Hydros");
   }

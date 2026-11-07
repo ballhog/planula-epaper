@@ -9,6 +9,8 @@
 
 #include <string>
 
+static volatile bool refusedFlag = false;
+
 namespace wst {
 
 namespace {
@@ -144,6 +146,7 @@ int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutM
   if (eol) *eol = 0;
   if (!strstr(resp, " 101")) {
     plog.printf("[ws] upgrade refused: %s\n", resp);
+    if (strstr(resp, " 401") || strstr(resp, " 403")) refusedFlag = true;
     return -1;
   }
   return 0;
@@ -232,6 +235,12 @@ esp_transport_handle_t create(const char *path, const char *subprotocol) {
   esp_transport_set_func(t, wsConnect, wsRead, wsWrite, wsClose, wsPollRead, wsPollWrite, wsDestroy);
   esp_transport_set_default_port(t, 443);
   return t;
+}
+
+bool takeRefused() {
+  bool r = refusedFlag;
+  refusedFlag = false;
+  return r;
 }
 
 }  // namespace wst

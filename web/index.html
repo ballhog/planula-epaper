@@ -191,6 +191,7 @@ th{font-size:12px;color:var(--muted);font-weight:500}
 <div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);
+let roomOffF=false;  // unit the room correction field was filled in
 function loadLog(){fetch('/api/log',{cache:'no-store'}).then(r=>r.text()).then(t=>{const b=$('logBox');b.style.display='';b.textContent=t||'(empty)';b.scrollTop=b.scrollHeight})}
 function copyLog(){const t=$('logBox').textContent;if(!t){loadLog();return}navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>toast('Log copied'),()=>{})}
 let S={},C={},R=[];
@@ -235,7 +236,7 @@ async function loadSettings(){
  $('hydrosOn').checked=C.hydros.on;$('hydrosUser').value=C.hydros.user;$('hydrosPass').value='';
  $('hydrosPass').placeholder=C.hydros.pass.set?'saved — leave blank to keep':'';
  const d=C.display;$('tz').value=d.tz;if($('tz').value!==d.tz){const o=new Option(d.tz,d.tz);$('tz').add(o);$('tz').value=d.tz}
- {const r=$('rotate'),v=String(d.rotate_s||0);if(![...r.options].some(o=>o.value===v)){const o=document.createElement('option');o.value=v;o.textContent='Every '+v+' s';r.appendChild(o)}r.value=v}$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';{const f=d.temp_f,o=+d.room_offset_c||0;$('roomOffUnit').textContent=f?'°F':'°C';$('roomOff').value=Math.round((f?o*1.8:o)*10)/10;$('roomOffBox').style.display=$('roomOffHint').style.display=(C.power||{}).battery?'':'none'}
+ {const r=$('rotate'),v=String(d.rotate_s||0);if(![...r.options].some(o=>o.value===v)){const o=document.createElement('option');o.value=v;o.textContent='Every '+v+' s';r.appendChild(o)}r.value=v}$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';{const f=!!d.temp_f,o=+d.room_offset_c||0;roomOffF=f;$('roomOffUnit').textContent=f?'°F':'°C';$('roomOff').value=Math.round((f?o*1.8:o)*10)/10;$('roomOffBox').style.display=$('roomOffHint').style.display=d.room_sensor?'':'none'}
  {const K=C.keys||{};
   // One option per page: "Go to page 2 · Chemistry (and back)"
   const names=[];const np=Math.max((C.pages||[]).length,...(C.gauges||[]).map(g=>(g.page||0)+1),0);
@@ -335,7 +336,7 @@ function saveGauges(){const gauges=G.filter(g=>g.key).map(g=>({key:g.key,label:g
 function saveKeys(){save({keys:{left:$('key_left').value,middle:$('key_middle').value,right:$('key_right').value,ack:$('key_ack').value,hold_left:$('key_hold_left').value,hold_middle:$('key_hold_middle').value,hold_right:$('key_hold_right').value}})}
 function pwShow(){const m=$('pwMode').value;$('pwEveryBox').style.display=m==='saver'?'':'none';
  $('pwDailyBox').style.display=m==='daily'?'':'none';$('pwHourlyBox').style.display=m==='daily'?'':'none'}
-function saveDisplay(){save({power:{mode:$('pwMode').value,every_min:+$('pwEvery').value||10,daily_at:$('pwDaily').value||'07:00',hourly_check:$('pwHourly').checked},display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,view:$('view').value,buzzer:$('buzzer').checked,temp_f:$('tempF').checked,room_offset_c:($('tempF').checked?(+$('roomOff').value||0)/1.8:(+$('roomOff').value||0)),
+function saveDisplay(){save({power:{mode:$('pwMode').value,every_min:+$('pwEvery').value||10,daily_at:$('pwDaily').value||'07:00',hourly_check:$('pwHourly').checked},display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,view:$('view').value,buzzer:$('buzzer').checked,temp_f:$('tempF').checked,room_offset_c:(roomOffF?(+$('roomOff').value||0)/1.8:(+$('roomOff').value||0)),
  stale_s:Math.max(1,+$('stale').value||10)*60,full_every:+$('fullEvery').value||60,driver:$('driver').value}})}
 function saveSystem(){const b={name:$('name').value.trim()};if($('adminClear').checked)b.admin_pass={clear:true};else if($('adminPass').value)b.admin_pass=$('adminPass').value;save(b)}
 
