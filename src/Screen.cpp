@@ -100,12 +100,18 @@ void fillChrome(panel::Chrome &c) {
     c.wifi = 0;
   }
   c.battery = board::batteryPct();
+  // Room sensor (reTerminal) in the footer: "72°F  45%".
+  float rc = board::roomC(), rh = board::roomRh();
+  if (!isnan(rc)) {
+    bool f = s.tempF;
+    snprintf(c.room, sizeof c.room, "%.0f°%s  %.0f%%", f ? rc * 9 / 5 + 32 : rc, f ? "F" : "C", rh);
+  }
   if (power::sleepy()) {
     // The screen is a snapshot: say when it was taken and when the next one is.
     String at = clockText(), nx = power::nextWakeText();
     char status[96];
     strlcpy(status, left, sizeof status);
-    snprintf(left, sizeof left, "Readings%s%s%s%s · %s", at.length() ? " from " : "", at.c_str(),
+    snprintf(left, sizeof left, "Updated%s%s%s%s · %s", at.length() ? " " : "", at.c_str(),
              nx.length() ? " · next " : "", nx.c_str(), status);
   }
   if (availBuild > 0 && coenoLinked()) snprintf(right, sizeof right, "update ready, hold 3 s");

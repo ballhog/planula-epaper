@@ -514,17 +514,9 @@ void pageFooter(Adafruit_GFX &d, const Page &p, const Chrome &c) {
   if (inv) d.fillRect(0, y, kW, kFooterH, INK);
   else d.fillRect(0, y, kW, 2, INK);
   int base = y + 23;
+  // No page name or page dots (2026-11-07, Joe: neither is needed); the room
+  // reading got the space.
   int x = 14;
-  x += drawText(d, font::Body, x, base + 1, p.title[0] ? p.title : "Reef", fg) + 10;
-  if (c.pages > 1) {
-    for (int i = 0; i < c.pages; i++) {
-      int cx = x + 5;
-      if (i == c.page) d.fillCircle(cx, y + 16, 5, fg);
-      else d.drawCircle(cx, y + 16, 5, fg);
-      x += 16;
-    }
-    x += 6;
-  }
   char left[96];
   if (c.alarm[0]) {
     if (c.alarmCount > 1)
@@ -534,11 +526,11 @@ void pageFooter(Adafruit_GFX &d, const Page &p, const Chrome &c) {
     snprintf(left, sizeof left, "%s", c.footerLeft);
   }
   int ix = footerIcons(d, c, kW - 14, base, fg);
+  if (c.room[0]) ix -= drawText(d, font::Small, ix - 4, base, c.room, fg, Right) + 22;
   int rw = c.footerRight[0] ? textWidth(font::Small, c.footerRight) : 0;
   if (rw) drawText(d, font::Small, ix - 4, base, c.footerRight, fg, Right);
   int rightEdge = ix - (rw ? rw + 16 : 0);
-  drawText(d, font::Small, x, base, "·", fg);
-  drawTextFit(d, font::Small, x + 14, base, left, fg, rightEdge - x - 30);
+  drawTextFit(d, font::Small, x, base, left, fg, rightEdge - x - 16);
 }
 
 // Alarm takeover: one or two gauges in alarm get the left half of the page,

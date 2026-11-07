@@ -79,10 +79,10 @@ static void chromeFor(Chrome &c, int page, int pages) {
   PANEL_COPY(c.clock, "8:41");
   c.page = page;
   c.pages = pages;
-  PANEL_COPY(c.footerLeft, "Coeno · page updated 40 s ago");
-  PANEL_COPY(c.footerRight, "build 12");
+  PANEL_COPY(c.footerLeft, "Updated 8:33 · next 8:48 · Apex ok · Hydros ok");
   c.wifi = 3;
   c.battery = 96;
+  PANEL_COPY(c.room, "72°F  45%");
 }
 
 static void samples() {

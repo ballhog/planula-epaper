@@ -22,7 +22,7 @@ uint32_t beepAt = 0;
 constexpr uint8_t kSht = 0x44;
 
 bool shtOk = false;
-float roomC = NAN, roomRh = NAN, volts = 0;
+float roomC_ = NAN, roomRh_ = NAN, volts = 0;
 int pct = -1;
 uint32_t lastRead = 0;
 
@@ -73,8 +73,8 @@ void readAll() {
   const Settings &s = settings::get();
   float t, h;
   if (shtOk && readSht(t, h)) {
-    roomC = t;
-    roomRh = h;
+    roomC_ = t;
+    roomRh_ = h;
     // Inside the case, next to the ESP32: reads a little warm when awake.
     readings::update("panel:room-temp", "Panel", s.name, "Room temperature", "temp", "°C", t);
     readings::update("panel:room-rh", "Panel", s.name, "Room humidity", "rh", "%", h);
@@ -132,10 +132,12 @@ bool beeping() { return beepStep >= 0; }
 bool hasBattery() { return pct >= 0; }
 int batteryPct() { return pct; }
 float batteryVolts() { return volts; }
+float roomC() { return roomC_; }
+float roomRh() { return roomRh_; }
 
 String status() {
   String o;
-  if (!isnan(roomC)) o = "room " + String(roomC, 1) + " °C " + String(roomRh, 0) + " %";
+  if (!isnan(roomC_)) o = "room " + String(roomC_, 1) + " °C " + String(roomRh_, 0) + " %";
   else o = shtOk ? "room sensor: no reading" : "room sensor not found";
   o += pct >= 0 ? " · battery " + String(pct) + " % (" + String(volts, 2) + " V)" : " · no battery";
   return o;
@@ -151,6 +153,8 @@ void loop() {}
 bool hasBattery() { return false; }
 int batteryPct() { return -1; }
 float batteryVolts() { return 0; }
+float roomC() { return NAN; }
+float roomRh() { return NAN; }
 String status() { return ""; }
 void alarmBeep() {}
 void silence() {}
