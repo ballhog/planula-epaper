@@ -50,6 +50,28 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
   single-button layout on the reTerminal and other pre-build-40 details;
   add the power modes, buttons, views, takeover, Outlets page.
 
+## Next round (2026-11-07, after a night on battery)
+
+- [ ] **9. History from the controllers, not just what the panel saw.** On
+  battery the panel looks every 15 min: trends are coarse, outlet changes land
+  late, short doses are missed, and a reflash starts from nothing. Read the
+  Apex data log and outlet log (`/rest/ilog`, `/rest/olog`) on each wake for
+  true 24 h sparklines and an accurate Outlets timeline. Find whether Hydros's
+  cloud API has the same.
+- [ ] **10. Hydros: don't sign in from scratch on every wake.** Each wake did
+  Cognito login, `/user`, `/thing`, GetCredentialsForIdentity, then the IoT
+  socket: four or five TLS handshakes. Keep the account details and the AWS
+  credentials (good for ~1 h) and reuse them.
+- [ ] **11. Measure the battery.** One night on Saver (15 min), % before and
+  after. Decides whether Saver is enough or Daily + hourly check is the default.
+- [ ] **12. Honest room temperature.** The SHT4x sits by the ESP32 and reads
+  warm once awake. Read it first thing on a wake, before Wi-Fi heats the
+  board, and add an offset setting.
+- [ ] **13. Glance cues.** A trend arrow (↑ ↓) on the Numbers view; a small mark
+  on tiles that moved since the last refresh.
+- [ ] **14. Product polish.** Host tests on real saved Apex / Hydros replies;
+  drop the Hydros boot dumps (item 7); setup that doesn't need the USB log.
+
 ## Open questions
 
 - [ ] **Hydros dose amounts.** Waiting on the `[hydros] a dosing head: …` boot
