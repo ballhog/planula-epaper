@@ -13,7 +13,12 @@ namespace {
 
 // Seeed's reTerminal E docs: SHT4x at 0x44 on SDA 19 / SCL 20; battery on
 // GPIO1 through a 1:2 divider, measured only while GPIO21 is high.
-constexpr int kSda = 19, kScl = 20, kBatAdc = 1, kBatEnable = 21;
+constexpr int kSda = 19, kScl = 20, kBatAdc = 1, kBatEnable = 21, kBuzzer = 45;
+
+// Beeps: on/off steps in ms, driven from loop() so nothing blocks.
+const uint16_t kPattern[] = {140, 110, 140, 110, 140};
+int beepStep = -1;
+uint32_t beepAt = 0;
 constexpr uint8_t kSht = 0x44;
 
 bool shtOk = false;
@@ -94,10 +99,35 @@ void begin() {
 }
 
 void loop() {
+  if (beepStep >= 0 && millis() - beepAt >= kPattern[beepStep]) {
+    beepAt = millis();
+    if (++beepStep >= (int)(sizeof kPattern / sizeof kPattern[0])) {
+      noTone(kBuzzer);
+      beepStep = -1;
+    } else if (beepStep % 2 == 0) {
+      tone(kBuzzer, 2700);
+    } else {
+      noTone(kBuzzer);
+    }
+  }
   if (millis() - lastRead < 60000) return;
   lastRead = millis();
   readAll();
 }
+
+void alarmBeep() {
+  if (!settings::get().buzzer) return;
+  tone(kBuzzer, 2700);
+  beepStep = 0;
+  beepAt = millis();
+}
+
+void silence() {
+  if (beepStep >= 0) noTone(kBuzzer);
+  beepStep = -1;
+}
+
+bool beeping() { return beepStep >= 0; }
 
 bool hasBattery() { return pct >= 0; }
 int batteryPct() { return pct; }
@@ -122,6 +152,9 @@ bool hasBattery() { return false; }
 int batteryPct() { return -1; }
 float batteryVolts() { return 0; }
 String status() { return ""; }
+void alarmBeep() {}
+void silence() {}
+bool beeping() { return false; }
 }  // namespace board
 
 #endif

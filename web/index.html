@@ -135,6 +135,7 @@ th{font-size:12px;color:var(--muted);font-weight:500}
   <p class="hint">On battery the panel sleeps between updates: press any button for fresh readings, and the settings page answers for 2 minutes after a press. Hydros direct needs a cloud login on every wake, so it uses the most battery; Apex or Coeno are quick.</p>
   </div>
   <div class="row"><div><label>Tiles show</label><select id="view"><option value="both">Number and trend</option><option value="numbers">Numbers only (big)</option><option value="graphs">Graphs (24 h trend, low/high)</option></select></div></div>
+  <label id="buzzerBox"><input type="checkbox" id="buzzer"> Beep on alarms (reTerminal: a new alarm, then every 5 min until you press the middle button)</label>
   <label><input type="checkbox" id="clock24"> 24-hour clock</label>
   <label><input type="checkbox" id="tempF"> Show temperatures in °F (direct mode)</label>
   <div class="row"><div><label>A value is stale after (minutes)</label><input id="stale" type="number" min="1"></div>
@@ -212,7 +213,7 @@ async function loadSettings(){
  $('hydrosOn').checked=C.hydros.on;$('hydrosUser').value=C.hydros.user;$('hydrosPass').value='';
  $('hydrosPass').placeholder=C.hydros.pass.set?'saved — leave blank to keep':'';
  const d=C.display;$('tz').value=d.tz;if($('tz').value!==d.tz){const o=new Option(d.tz,d.tz);$('tz').add(o);$('tz').value=d.tz}
- $('rotate').value=d.rotate_s;$('clock24').checked=d.clock24;$('view').value=d.view||'both';
+ $('rotate').value=d.rotate_s;$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';
  {const P=C.power||{};$('powerBox').style.display=P.battery?'':'none';$('pwMode').value=P.mode||'live';$('pwEvery').value=P.every_min||10;
   $('pwDaily').value=P.daily_at||'07:00';$('pwHourly').checked=P.hourly_check!==false;pwShow()}$('tempF').checked=d.temp_f;$('stale').value=Math.round(d.stale_s/60);
  $('fullEvery').value=d.full_every;$('driver').value=d.driver;
@@ -289,7 +290,7 @@ function saveGauges(){const gauges=G.filter(g=>g.key).map(g=>({key:g.key,label:g
 // ── display + system
 function pwShow(){const m=$('pwMode').value;$('pwEveryBox').style.display=m==='saver'?'':'none';
  $('pwDailyBox').style.display=m==='daily'?'':'none';$('pwHourlyBox').style.display=m==='daily'?'':'none'}
-function saveDisplay(){save({power:{mode:$('pwMode').value,every_min:+$('pwEvery').value||10,daily_at:$('pwDaily').value||'07:00',hourly_check:$('pwHourly').checked},display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,view:$('view').value,temp_f:$('tempF').checked,
+function saveDisplay(){save({power:{mode:$('pwMode').value,every_min:+$('pwEvery').value||10,daily_at:$('pwDaily').value||'07:00',hourly_check:$('pwHourly').checked},display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,view:$('view').value,buzzer:$('buzzer').checked,temp_f:$('tempF').checked,
  stale_s:Math.max(1,+$('stale').value||10)*60,full_every:+$('fullEvery').value||60,driver:$('driver').value}})}
 function saveSystem(){const b={name:$('name').value.trim()};if($('adminClear').checked)b.admin_pass={clear:true};else if($('adminPass').value)b.admin_pass=$('adminPass').value;save(b)}
 

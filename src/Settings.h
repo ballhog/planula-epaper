@@ -57,6 +57,7 @@ struct Settings {
   uint16_t saverMin = 10;
   String dailyAt = "07:00";
   bool hourlyCheck = true;
+  bool buzzer = true;  // reTerminal: beep on a new alarm and every 5 min until acknowledged
   String view = "both";  // both | numbers | graphs (tile view; a button cycles it on the reTerminal)
   bool tempF = false;        // direct mode: show temperatures in °F
   uint16_t rotate_s = 0;     // 0 = pages only change with the button

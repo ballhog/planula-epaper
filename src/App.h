@@ -35,5 +35,6 @@ uint32_t alarmSig();               // hash of the alarm ids now showing
 // same alarms were acknowledged before the sleep.
 void syncAlarms(bool wasAcked, uint32_t ackedSig);
 bool updating();                   // a firmware download/install is running
+bool hasUnackedAlarm();
 
 }  // namespace app

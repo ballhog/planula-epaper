@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "Apex.h"
+#include "Board.h"
 #include "App.h"
 #include "CoenoLink.h"
 #include "Display.h"
@@ -285,6 +286,16 @@ void loop() {
     // than putting "Joining Wi-Fi" on the wall until the next wake.
     if (!net::online()) draw = false;
     if (draw) drawAndRemember();
+    // A new or still unacknowledged alarm: beep before sleeping again. (A
+    // button press during the beep acknowledges it and keeps it awake.)
+    if (draw && app::hasUnackedAlarm()) {
+      board::alarmBeep();
+      uint32_t t0 = millis();
+      while (board::beeping() && millis() - t0 < 2000) {
+        board::loop();
+        delay(5);
+      }
+    }
     sleeping = true;
     goToSleep();
     return;

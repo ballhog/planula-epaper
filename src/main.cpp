@@ -171,6 +171,7 @@ void collectAlarms() {
     acked = false;
     flashAsked = true;
     lastReminder = millis();
+    board::alarmBeep();
   }
   if (now.empty()) acked = false;
   alarms = now;
@@ -505,7 +506,7 @@ void onCoenoCommand(const String &leaf, const String &payload) {
   else if (leaf == "identify") app::identify();
   else if (leaf == "check") app::checkUpdateSoon();
   else if (leaf == "update") app::installUpdateSoon();
-  else if (leaf == "ack") { acked = true; app::redraw(false); }
+  else if (leaf == "ack") { acked = true; board::silence(); app::redraw(false); }
 }
 
 #if !defined(BOARD_RETERMINAL)  // the reTerminal has its own keys, below
@@ -859,6 +860,7 @@ void redraw(bool full) {
 }
 void ackAlarm() {
   acked = true;
+  board::silence();
   JsonDocument d;
   JsonArray a = d["ids"].to<JsonArray>();
   for (auto &al : alarms) a.add(al.id);
@@ -897,9 +899,11 @@ uint32_t alarmSig() {
 void syncAlarms(bool wasAcked, uint32_t ackedSig) {
   collectAlarms();
   if (wasAcked && ackedSig && alarmSig() == ackedSig) acked = true;
-  flashAsked = false;  // no flash on a battery wake
+  flashAsked = false;  // no flash on a battery wake (power beeps instead)
+  board::silence();
 }
 bool updating() { return updatingFrom != nullptr; }
+bool hasUnackedAlarm() { return !alarms.empty() && !acked; }
 void identify() {
   identifyAsked = true;
   redrawAsked = true;
@@ -1023,6 +1027,7 @@ void loop() {
   if (!alarms.empty() && !acked && !power::sleepy() && now - lastReminder > 300000UL) {
     lastReminder = now;
     display::flash(1);
+    board::alarmBeep();
   }
   stateOnChange();
   static uint32_t lastMemLog = 0;
