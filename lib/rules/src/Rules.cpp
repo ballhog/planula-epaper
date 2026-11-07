@@ -226,4 +226,18 @@ bool apexOn(const char *st) {
   return false;
 }
 
+float mlIn(const char *vs) {
+  if (!vs) return 0;
+  for (const char *p = vs; *p; p++) {
+    if ((p[0] == 'm' || p[0] == 'M') && (p[1] == 'l' || p[1] == 'L')) {
+      const char *q = p;
+      while (q > vs && q[-1] == ' ') q--;
+      const char *e = q;
+      while (q > vs && (isdigit((unsigned char)q[-1]) || q[-1] == '.')) q--;
+      if (q < e) return strtof(q, nullptr);
+    }
+  }
+  return 0;
+}
+
 }  // namespace rules

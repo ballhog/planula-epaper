@@ -1,6 +1,7 @@
 // Firmware updates: Coeno / GitHub check and install, upload from the Mac.
 // Split out of main.cpp; shared state in Shared.h.
 #include "Shared.h"
+#include "Log.h"
 
 namespace ui {
 
@@ -23,15 +24,15 @@ void netUpload() {
     ArduinoOTA.setPassword(OTA_PASSWORD);
 #endif
     ArduinoOTA.onStart([] {
-      Serial.println("[update] network upload started");
+      plog.println("[update] network upload started");
       panel::Chrome c;
       display::show(message("Updating firmware", "Receiving from the Mac. Don't unplug the panel.", "", c), false);
     });
     ArduinoOTA.onEnd([] {
-      Serial.println("[update] network upload done");
+      plog.println("[update] network upload done");
       ota_mark_pending();
     });
-    ArduinoOTA.onError([](ota_error_t e) { Serial.printf("[update] network upload failed (%d)\n", (int)e); });
+    ArduinoOTA.onError([](ota_error_t e) { plog.printf("[update] network upload failed (%d)\n", (int)e); });
     ArduinoOTA.begin();
     otaStarted = true;
   }
@@ -117,7 +118,7 @@ void installUpdate() {
       return;
     }
     ota_mark_pending();
-    Serial.printf("[update] build %ld from GitHub installed, restarting\n", availBuild);
+    plog.printf("[update] build %ld from GitHub installed, restarting\n", availBuild);
     delay(300);
     ESP.restart();
   }
@@ -138,7 +139,7 @@ void checkJob() {
   checkUpdates();
   checking = false;
   checkedAtMs = millis();
-  Serial.printf("[update] %s (8-bit largest %u)\n", updateText.get().c_str(),
+  plog.printf("[update] %s (8-bit largest %u)\n", updateText.get().c_str(),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   if (availBuild > 0 && settings::get().autoUpdate) autoInstallReady = true;
   // Couldn't reach anything (e.g. DNS not ready just after joining Wi-Fi):

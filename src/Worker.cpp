@@ -1,4 +1,5 @@
 #include "Worker.h"
+#include "Log.h"
 
 #include <freertos/queue.h>
 #include <freertos/task.h>
@@ -130,14 +131,14 @@ bool acquire(const char *name, uint32_t waitMs) {
     // loop() must not wait for the token: the Hydros session gives it back
     // from loop(), so that would only ever time out. Network work belongs on
     // the worker (worker::post).
-    Serial.printf("[tls] %s called from loop(); move it to the worker\n", name);
+    plog.printf("[tls] %s called from loop(); move it to the worker\n", name);
     waitMs = 0;
   }
   waiters = waiters + 1;
   bool got = xSemaphoreTake(sem, pdMS_TO_TICKS(waitMs)) == pdTRUE;
   waiters = waiters - 1;
   if (!got) {
-    Serial.printf("[tls] %s gave up waiting for %s\n", name, who);
+    plog.printf("[tls] %s gave up waiting for %s\n", name, who);
     return false;
   }
   owner = me;

@@ -100,4 +100,7 @@ int slotPoints(const float *sum, const uint16_t *n, int slots, float *out);
 // "ON" / "AON" / "TBL" ... -> on (Apex output log states).
 bool apexOn(const char *state);
 
+// "Dosed 2.5 ml" -> 2.5 (the number before "ml", any case); 0 when none.
+float mlIn(const char *text);
+
 }  // namespace rules

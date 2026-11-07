@@ -69,8 +69,11 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
   board, and add an offset setting.
 - [x] **13. Glance cues.** A trend arrow (↑ ↓) on the Numbers view; a small mark
   on tiles that moved since the last refresh.
-- [ ] **14. Product polish.** Host tests on real saved Apex / Hydros replies;
-  drop the Hydros boot dumps (item 7); setup that doesn't need the USB log.
+- [ ] **14. Product polish.** Done: Log card on the settings page (`/api/log`,
+  last 16 kB; 4 kB on the Waveshare board), Hydros boot dumps gone, host tests
+  on values from Joe's logs. Still open: a full saved Apex `/rest/status` and
+  `/rest/ilog` reply as test fixtures (needs one capture), and setup that
+  doesn't need the USB log for the password.
 
 ## Open questions
 

@@ -10,6 +10,7 @@
 //              hold 10 s = open the setup Wi-Fi network
 //              hold 25 s = erase all settings
 #include "Shared.h"
+#include "Log.h"
 
 // Pages (a few kB each) and the renderer live on the loop task's stack.
 // Network calls run on the worker task (12 kB, Worker.cpp); loop() only draws
@@ -206,7 +207,7 @@ void cycleView() {
   Settings &s = settings::get();
   s.view = s.view == "both" ? "graphs" : s.view == "graphs" ? "numbers" : "both";
   settings::save();
-  Serial.printf("[view] %s\n", s.view.c_str());
+  plog.printf("[view] %s\n", s.view.c_str());
   redrawAsked = true;
 }
 void redraw(bool full) {
@@ -288,13 +289,13 @@ void setup() {
 #if defined(BOARD_RETERMINAL)
   keysBegin();  // again: power::begin() handed the keys back from their sleep (RTC) setup
 #endif
-  Serial.printf("\nPlanula-ePaper build %d (%s), name %s, mode %s\n", FW_BUILD, FW_VERSION,
+  plog.printf("\nPlanula-ePaper build %d (%s), name %s, mode %s\n", FW_BUILD, FW_VERSION,
                 settings::get().name.c_str(), settings::get().mode.c_str());
   display::begin(settings::get().panelDriver);
   if (settings::get().mode == "direct" && settings::get().hydrosOn) hydros::reserve();
   worker::begin();
   board::begin();
-  Serial.printf("[mem] after start: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
+  plog.printf("[mem] after start: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
   net::begin();
   // The USB log is only readable with the panel in your hands (and the cable can
@@ -390,7 +391,7 @@ void loop() {
     lastMemLog = now;
     // 8-bit-capable RAM is what TLS, Wi-Fi and the page can use (getFreeHeap
     // also counts IRAM that only takes 32-bit words).
-    Serial.printf("[mem] free %u (8-bit %u), largest 8-bit block %u, lowest %u; stack unused: loop %u, net %u\n",
+    plog.printf("[mem] free %u (8-bit %u), largest 8-bit block %u, lowest %u; stack unused: loop %u, net %u\n",
                   (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (unsigned)ESP.getMinFreeHeap(),
                   (unsigned)uxTaskGetStackHighWaterMark(nullptr), (unsigned)worker::stackFree());

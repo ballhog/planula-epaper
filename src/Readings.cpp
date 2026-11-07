@@ -1,4 +1,5 @@
 #include "Readings.h"
+#include "Log.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -67,7 +68,7 @@ void update(const String &key, const char *source, const String &device, const S
     if (!strcmp(items[i].key, key.c_str())) { r = &items[i]; break; }
   if (!r) {
     if (n >= kMax) {
-      if (nDropped++ % 50 == 0) Serial.printf("[readings] table full (%d), dropped %s\n", kMax, key.c_str());
+      if (nDropped++ % 50 == 0) plog.printf("[readings] table full (%d), dropped %s\n", kMax, key.c_str());
       return;
     }
     r = &items[n++];

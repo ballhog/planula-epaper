@@ -1,4 +1,5 @@
 #include "Board.h"
+#include "Log.h"
 
 #if defined(BOARD_RETERMINAL)
 
@@ -96,7 +97,7 @@ void begin() {
   shtOk = Wire.endTransmission() == 0;
   readAll();
   lastRead = millis();
-  Serial.printf("[board] room sensor %s; battery %.2f V (%d %%)\n", shtOk ? "found" : "NOT found", volts, pct);
+  plog.printf("[board] room sensor %s; battery %.2f V (%d %%)\n", shtOk ? "found" : "NOT found", volts, pct);
 }
 
 void loop() {

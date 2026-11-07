@@ -1,4 +1,5 @@
 #include "Display.h"
+#include "Log.h"
 
 #include <GxEPD2_BW.h>
 #include <SPI.h>
@@ -133,7 +134,7 @@ bool show(const Scene &scene, bool forceFull) {
   }
   uint32_t t0 = millis();
   push(full);
-  Serial.printf("[display] %s refresh: %u render(s) %u ms, panel %u ms\n", full ? "full" : "partial",
+  plog.printf("[display] %s refresh: %u render(s) %u ms, panel %u ms\n", full ? "full" : "partial",
                 (unsigned)renders, (unsigned)(renderUs / 1000), (unsigned)(millis() - t0));
   first = false;
   fullAsked = false;

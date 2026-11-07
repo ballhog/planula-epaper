@@ -555,6 +555,30 @@ static void testHistory() {
     n = lanePoints(d, 8 * H, -720, true, false, t, v, 48);
     CHECK(n == 4 && t[3] == 0 && isnan(v[3]));
   }
+  // dosing log text
+  CHECK(fabsf(mlIn("Dosed 2.5 ml") - 2.5f) < 1e-5f);
+  CHECK(fabsf(mlIn("Manual dose: 12ML") - 12.0f) < 1e-5f);
+  CHECK(mlIn("Dose skipped") == 0 && mlIn("") == 0 && mlIn(nullptr) == 0);
+  // Hydros outputs as Joe's status reported them (2026-11-07 log):
+  // 1R WATERCHANGE valueState 10000, drain 0, fill 0 -> running (on)
+  CHECK(hydrosLevel(10000, 0, 0, false) == 100);
+  // 1RX10D1-Part C: a dosing head (rpm 100) idle, valueState 0
+  CHECK(hydrosLevel(0, NAN, NAN, true) == 0);
+  // 300 Gyre / 1RTunzeSmp: valueState 10000 -> 100 %
+  CHECK(hydrosLevel(10000, NAN, NAN, false) == 100);
+  CHECK(hydrosLevel(4550, NAN, NAN, false) == 46);  // a pump at 45.5 %
+  // Apex output states as /rest/status reports them
+  {
+    bool on, manual, hidden;
+    apexOutput("AON", "outlet", on, manual, hidden);
+    CHECK(on && !manual && !hidden);
+    apexOutput("OFF", "outlet", on, manual, hidden);
+    CHECK(!on && manual);
+    apexOutput("TBL", "variable", on, manual, hidden);
+    CHECK(on && !manual);
+    apexOutput("AOF", "alert", on, manual, hidden);
+    CHECK(!on && hidden);
+  }
   // output log states
   CHECK(apexOn("ON") && apexOn("AON") && apexOn("TBL") && apexOn("1"));
   CHECK(!apexOn("OFF") && !apexOn("AOF") && !apexOn("0") && !apexOn(nullptr));

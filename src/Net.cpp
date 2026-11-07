@@ -1,4 +1,5 @@
 #include "Net.h"
+#include "Log.h"
 
 #include <ArduinoJson.h>
 #include <DNSServer.h>
@@ -78,7 +79,7 @@ void stopAp() {
 
 void startServices() {
   const Settings &s = settings::get();
-  Serial.printf("[wifi] joined %s, IP %s, gateway %s, DNS %s, %d dBm, %u ms after boot%s\n", WiFi.SSID().c_str(),
+  plog.printf("[wifi] joined %s, IP %s, gateway %s, DNS %s, %d dBm, %u ms after boot%s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
                 WiFi.dnsIP(0).toString().c_str(), WiFi.RSSI(), (unsigned)millis(), fastTry ? " (fast rejoin)" : "");
   fastTry = false;
@@ -184,7 +185,7 @@ void loop() {
     return;
   }
   if (fastTry && millis() - fastAt > 6000) {  // the remembered access point didn't answer
-    Serial.println("[wifi] fast rejoin failed, scanning");
+    plog.println("[wifi] fast rejoin failed, scanning");
     fastTry = false;
     fast.magic = 0;
     WiFi.disconnect(false, false);

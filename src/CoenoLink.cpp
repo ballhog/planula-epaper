@@ -1,4 +1,5 @@
 #include "CoenoLink.h"
+#include "Log.h"
 
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -182,7 +183,7 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
   switch ((esp_mqtt_event_id_t)id) {
     case MQTT_EVENT_CONNECTED: {
       isConnected = true;
-      Serial.printf("[coeno] connected to %s\n", uri.c_str());
+      plog.printf("[coeno] connected to %s\n", uri.c_str());
       String dsc = describe();   // before hello: hello says the description is there
       esp_mqtt_client_publish(e->client, (prefix + "describe").c_str(), dsc.c_str(), dsc.length(), 1, 1);
       String h = hello(true);
@@ -240,7 +241,7 @@ void start() {
     pages = new (std::nothrow) panel::Page[panel::kMaxPages];
     staging = new (std::nothrow) panel::Page();
     if (!pages || !staging) {
-      Serial.println("[coeno] no memory for pages");
+      plog.println("[coeno] no memory for pages");
       delete[] pages;
       delete staging;
       pages = nullptr;
@@ -278,7 +279,7 @@ void start() {
   esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, onEvent, nullptr);
   esp_mqtt_client_start(client);
   activeKey = s.name + "@" + uri;
-  Serial.printf("[coeno] connecting to %s (clear the Coeno address to stop)\n", uri.c_str());
+  plog.printf("[coeno] connecting to %s (clear the Coeno address to stop)\n", uri.c_str());
 }
 
 }  // namespace

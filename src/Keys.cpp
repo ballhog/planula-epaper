@@ -1,6 +1,7 @@
 // Buttons: the BOOT button (Waveshare) and the reTerminal's three keys.
 // Split out of main.cpp; shared state in Shared.h.
 #include "Shared.h"
+#include "Log.h"
 
 namespace ui {
 
@@ -96,7 +97,7 @@ void keys() {
   bool eR = readKey(keyRight, now), eM = readKey(keyMid, now), eL = readKey(keyLeft, now);
   if (eR || eM || eL) power::touch();
   if (eR || eM || eL)
-    Serial.printf("[keys] left %s, middle %s, right %s\n", keyLeft.down ? "down" : "up", keyMid.down ? "down" : "up",
+    plog.printf("[keys] left %s, middle %s, right %s\n", keyLeft.down ? "down" : "up", keyMid.down ? "down" : "up",
                   keyRight.down ? "down" : "up");
 
   // Left + right held together: erase.

@@ -1,4 +1,5 @@
 #include "Hydros.h"
+#include "Log.h"
 
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -65,10 +66,10 @@ RTC_DATA_ATTR uint32_t doseLogsAtS;  // last dosing-log read (epoch s), kept thr
 void setState(const String &st) {
   state = st;
   if (st != lastLogged && !st.startsWith("ok")) {
-    Serial.printf("[hydros] %s\n", st.c_str());
+    plog.printf("[hydros] %s\n", st.c_str());
     lastLogged = st;
   } else if (st.startsWith("ok") && !lastLogged.startsWith("ok")) {
-    Serial.printf("[hydros] %s\n", st.c_str());
+    plog.printf("[hydros] %s\n", st.c_str());
     lastLogged = st;
   }
 }
@@ -329,7 +330,7 @@ String connectSteps(const String &user, const String &pass, bool forTest, String
   if (saved && c.ak.length() && c.exp > nowS + 600) {
     useSaved(c);
     fromCache = true;
-    Serial.printf("[hydros] saved sign-in (AWS credentials good for %u more min)\n", (unsigned)((c.exp - nowS) / 60));
+    plog.printf("[hydros] saved sign-in (AWS credentials good for %u more min)\n", (unsigned)((c.exp - nowS) / 60));
     return "";
   }
   Login L = login(user, pass);
@@ -342,10 +343,10 @@ String connectSteps(const String &user, const String &pass, bool forTest, String
       useSaved(c);
       saveCreds(c);
       fromCache = true;
-      Serial.printf("[hydros] signed in with the saved account details (new AWS credentials)\n");
+      plog.printf("[hydros] signed in with the saved account details (new AWS credentials)\n");
       return "";
     }
-    Serial.printf("[hydros] saved account details didn't work (%s); full sign-in\n", e.c_str());
+    plog.printf("[hydros] saved account details didn't work (%s); full sign-in\n", e.c_str());
     forgetAll();
   }
 
@@ -490,13 +491,13 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     // Inflate as a stream through a fixed 32 kB window (allocated once), so the
     // size of the JSON inside doesn't matter. See InflateReader.
     if (!inflater.ready()) {
-      Serial.printf("[hydros] no memory to inflate (largest free block %u bytes)\n", (unsigned)ESP.getMaxAllocHeap());
+      plog.printf("[hydros] no memory to inflate (largest free block %u bytes)\n", (unsigned)ESP.getMaxAllocHeap());
       return;
     }
     int st = 0;
     long m = inflater.run(p, n, &st);
     if (m < 0) {
-      Serial.printf("[hydros] %s: zlib failed (%d%s)\n", topic.c_str(), st,
+      plog.printf("[hydros] %s: zlib failed (%d%s)\n", topic.c_str(), st,
                     st == TINFL_STATUS_HAS_MORE_OUTPUT ? ", inflates to more than 16 kB" : "");
       return;
     }
@@ -505,16 +506,16 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     err = deserializeJson(doc, (const char *)p, n, DeserializationOption::Filter(filter));
   }
   if (err) {
-    Serial.printf("[hydros] %s: %u bytes, JSON %s (free %u)\n", topic.c_str(), (unsigned)len, err.c_str(),
+    plog.printf("[hydros] %s: %u bytes, JSON %s (free %u)\n", topic.c_str(), (unsigned)len, err.c_str(),
                   (unsigned)ESP.getFreeHeap());
     return;
   }
-  if (!lastMsg) Serial.printf("[hydros] first data %u s after start\n", (unsigned)(millis() / 1000));
+  if (!lastMsg) plog.printf("[hydros] first data %u s after start\n", (unsigned)(millis() / 1000));
   lastMsg = millis();
   static uint32_t lastLog = 0;
   if (!lastLog || millis() - lastLog > 300000UL) {
     lastLog = millis();
-    Serial.printf("[hydros] data on %s: %u bytes, %u inputs\n", topic.c_str(), (unsigned)len,
+    plog.printf("[hydros] data on %s: %u bytes, %u inputs\n", topic.c_str(), (unsigned)len,
                   (unsigned)doc["Input"].as<JsonObjectConst>().size());
   }
   for (JsonPairConst kv : doc["Input"].as<JsonObjectConst>()) {
@@ -550,7 +551,7 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
       connected = true;
       sawConnect = true;
       lastMsg = millis();
-      Serial.printf("[hydros] AWS IoT connected (%s), asking %u controller(s) for status\n", wsHost.c_str(),
+      plog.printf("[hydros] AWS IoT connected (%s), asking %u controller(s) for status\n", wsHost.c_str(),
                     (unsigned)things.size());
       connectedAt = millis();
       for (size_t i = 0; i < things.size(); i++) {
@@ -560,32 +561,32 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
         String reqT = userId + "/" + t.id + "/req/LISTEN/statusc";
         int sid = esp_mqtt_client_subscribe(e->client, rspT.c_str(), 1);
         int pid = esp_mqtt_client_publish(e->client, reqT.c_str(), "", 0, 1, 0);
-        Serial.printf("[hydros] %s: subscribe %s (msg %d), request %s (msg %d)\n", t.name.c_str(), rspT.c_str(), sid,
+        plog.printf("[hydros] %s: subscribe %s (msg %d), request %s (msg %d)\n", t.name.c_str(), rspT.c_str(), sid,
                       reqT.c_str(), pid);
       }
       break;
     case MQTT_EVENT_DISCONNECTED:
       connected = false;
-      Serial.println("[hydros] AWS IoT disconnected");
+      plog.println("[hydros] AWS IoT disconnected");
       if (!onlyFirst && things.size() > 1 && connectedAt && millis() - connectedAt < 15000) {
         onlyFirst = true;
-        Serial.printf("[hydros] dropped right after asking %u controllers; next session asks only %s\n",
+        plog.printf("[hydros] dropped right after asking %u controllers; next session asks only %s\n",
                       (unsigned)things.size(), things[0].name.c_str());
       }
       break;
     case MQTT_EVENT_ERROR:
       if (e->error_handle)
-        Serial.printf("[hydros] AWS IoT error: type %d, tls 0x%x, errno %d, refused %d\n",
+        plog.printf("[hydros] AWS IoT error: type %d, tls 0x%x, errno %d, refused %d\n",
                       (int)e->error_handle->error_type, (unsigned)e->error_handle->esp_tls_last_esp_err,
                       e->error_handle->esp_transport_sock_errno, (int)e->error_handle->connect_return_code);
       break;
     case MQTT_EVENT_SUBSCRIBED:
       // data = the SUBACK return code(s): 0..2 = granted QoS, 0x80 = refused by AWS's policy
-      Serial.printf("[hydros] subscription msg %d: %s\n", e->msg_id,
+      plog.printf("[hydros] subscription msg %d: %s\n", e->msg_id,
                     (e->data_len > 0 && (uint8_t)e->data[0] == 0x80) ? "REFUSED by AWS" : "granted");
       break;
     case MQTT_EVENT_PUBLISHED:
-      Serial.printf("[hydros] request msg %d delivered\n", e->msg_id);
+      plog.printf("[hydros] request msg %d delivered\n", e->msg_id);
       break;
     case MQTT_EVENT_DATA: {
       if (e->current_data_offset == 0) {
@@ -593,9 +594,9 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
         rxLen = 0;
         size_t need = e->total_data_len;
         static uint32_t msgs = 0;
-        if (++msgs <= 3) Serial.printf("[hydros] message on %s, %u bytes\n", rxTopic.c_str(), (unsigned)need);
+        if (++msgs <= 3) plog.printf("[hydros] message on %s, %u bytes\n", rxTopic.c_str(), (unsigned)need);
         if (need > 96 * 1024) {  // too big to hold: skip
-          Serial.printf("[hydros] skipped %u-byte message on %s (too big)\n", (unsigned)need, rxTopic.c_str());
+          plog.printf("[hydros] skipped %u-byte message on %s (too big)\n", (unsigned)need, rxTopic.c_str());
           rxCap = 0;
           free(rx);
           rx = nullptr;
@@ -658,7 +659,7 @@ bool startClient() {
   }
   esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, onEvent, nullptr);
   esp_err_t e = esp_mqtt_client_start(client);
-  if (e != ESP_OK) Serial.printf("[hydros] MQTT start: %s\n", esp_err_to_name(e));
+  if (e != ESP_OK) plog.printf("[hydros] MQTT start: %s\n", esp_err_to_name(e));
   return e == ESP_OK;
 }
 
@@ -668,16 +669,8 @@ bool startClient() {
 // call as pyhydros' get_dosing_logs). Read every 30 min for the picked dosing
 // heads, while this task holds the TLS token and before the session opens.
 float doseMl(JsonObjectConst r) {
-  const char *vs = r["valueString"] | "";
-  for (const char *p = vs; *p; p++) {
-    if ((p[0] == 'm' || p[0] == 'M') && (p[1] == 'l' || p[1] == 'L')) {
-      const char *q = p;
-      while (q > vs && (q[-1] == ' ')) q--;
-      const char *e = q;
-      while (q > vs && (isdigit((unsigned char)q[-1]) || q[-1] == '.')) q--;
-      if (q < e) return strtof(q, nullptr);
-    }
-  }
+  float ml = rules::mlIn(r["valueString"] | "");
+  if (ml > 0) return ml;
   for (const char *k : {"valueDec", "value"}) {
     JsonVariantConst v = r[k];
     if (v.is<float>() || v.is<int>()) return v.as<float>();
@@ -714,7 +707,7 @@ void readDoseLogs() {
     https::Result r = https::requestJson("GET", url, {{"Authorization", idTok}, {"Content-Type", "application/json"}}, "",
                                          d, &filter);
     if (r.status != 200 || r.error.length()) {
-      Serial.printf("[hydros] dosing log for %s: HTTP %d %s\n", name.c_str(), r.status, r.error.c_str());
+      plog.printf("[hydros] dosing log for %s: HTTP %d %s\n", name.c_str(), r.status, r.error.c_str());
       continue;
     }
     JsonArrayConst arr = d.as<JsonArrayConst>();
@@ -742,9 +735,9 @@ void readDoseLogs() {
         std::swap(ml[j - 1], ml[j]);
       }
     bool set = m && outlets::setDoses(o.key.c_str(), at, ml, m);
-    Serial.printf("[hydros] dosing log for %s: %d dose(s) in 24 h%s%s\n", name.c_str(), m,
+    plog.printf("[hydros] dosing log for %s: %d dose(s) in 24 h%s%s\n", name.c_str(), m,
                   m ? ", last " : "", m ? (String(ml[m - 1], 1) + " mL").c_str() : "");
-    if (!set && m) Serial.printf("[hydros] (not shown: %s isn't on the Outlets page)\n", name.c_str());
+    if (!set && m) plog.printf("[hydros] (not shown: %s isn't on the Outlets page)\n", name.c_str());
   }
 }
 
@@ -753,7 +746,7 @@ void loginJob(String user, String pass, uint8_t g) {
   if (!tls::acquire("Hydros login")) {
     err = "waiting for the network (" + String(tls::holder()) + ")";
   } else {
-    Serial.printf("[mem] before Hydros login: 8-bit free %u, largest %u\n",
+    plog.printf("[mem] before Hydros login: 8-bit free %u, largest %u\n",
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     err = connectSteps(user, pass, false, nullptr);
@@ -781,7 +774,7 @@ void loginFinished(uint32_t now) {
   static uint8_t tlsMemFails = 0;
   if (err.indexOf("ESP_ERR_HTTP_CONNECT") >= 0 && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 45000) {
     if (++tlsMemFails >= 3) {
-      Serial.printf("[hydros] heap too fragmented for TLS (largest 8-bit block %u); restarting\n",
+      plog.printf("[hydros] heap too fragmented for TLS (largest 8-bit block %u); restarting\n",
                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
       delay(200);
       ESP.restart();
@@ -797,7 +790,7 @@ void loginFinished(uint32_t now) {
   }
   holdsTls = true;
   sawConnect = false;
-  Serial.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s (request %u bytes)\n",
+  plog.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s (request %u bytes)\n",
                 (unsigned)things.size(), things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str(),
                 (unsigned)wsPath.length());
   sessionStart = millis();
@@ -846,7 +839,7 @@ void loop() {
     bool dropped = !connected && sinceStart > 30000;
     if (expired || silent || dropped) {
       if (dropped && fromCache && !sawConnect) {
-        Serial.println("[hydros] saved AWS credentials refused; signing in again");
+        plog.println("[hydros] saved AWS credentials refused; signing in again");
         forgetCreds();
         fromCache = false;
         dropped = false;  // not a network problem: sign in again now, no backoff
@@ -887,7 +880,7 @@ void loop() {
 
 void reserve() {
   if (!inflater.ready())
-    Serial.printf("[hydros] couldn't reserve inflate memory (largest block %u)\n", (unsigned)ESP.getMaxAllocHeap());
+    plog.printf("[hydros] couldn't reserve inflate memory (largest block %u)\n", (unsigned)ESP.getMaxAllocHeap());
 }
 
 void restart() {

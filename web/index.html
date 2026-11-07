@@ -181,6 +181,9 @@ th{font-size:12px;color:var(--muted);font-weight:500}
   <button class="btn pri" onclick="uploadFw()">Upload and install</button></div>
   <div class="result" id="fwRes"></div>
  </div>
+ <div class="card"><h2>Log</h2><p class="hint">What the panel has been doing: the last few kB of the log it also prints over USB, newest at the bottom. Handy on battery, when there is no cable to read.</p>
+  <div class="btns"><button class="btn" onclick="loadLog()">Show / refresh</button><button class="btn" onclick="copyLog()">Copy</button></div>
+  <pre id="logBox" style="display:none;max-height:420px;overflow:auto;font-size:12px;white-space:pre-wrap;background:#f4f4f4;padding:8px;border-radius:6px"></pre></div>
  <div class="card"><h2>Start over</h2><p class="hint">Erases Wi-Fi, logins and gauges. Holding the BOOT button for 25 s does the same.</p>
   <button class="btn bad" onclick="if(prompt('Type erase to wipe all settings')==='erase')post('/api/factory-reset',{confirm:'erase'})">Erase all settings</button></div>
 </section>
@@ -188,6 +191,8 @@ th{font-size:12px;color:var(--muted);font-weight:500}
 <div class="toast" id="toast"></div>
 <script>
 const $=id=>document.getElementById(id);
+function loadLog(){fetch('/api/log',{cache:'no-store'}).then(r=>r.text()).then(t=>{const b=$('logBox');b.style.display='';b.textContent=t||'(empty)';b.scrollTop=b.scrollHeight})}
+function copyLog(){const t=$('logBox').textContent;if(!t){loadLog();return}navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>toast('Log copied'),()=>{})}
 let S={},C={},R=[];
 function toast(t){const e=$('toast');e.textContent=t;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),2600)}
 async function get(u){const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw new Error(u+' '+r.status);return r.json()}

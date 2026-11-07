@@ -1,4 +1,5 @@
 #include "WsTransport.h"
+#include "Log.h"
 
 #include <Arduino.h>
 #include <esp_crt_bundle.h>
@@ -94,7 +95,7 @@ int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutM
   c->prePos = 0;
   c->remaining = 0;
   if (esp_transport_connect(c->ssl, host, port, timeoutMs) < 0) {
-    Serial.printf("[ws] TLS connect to %s:%d failed\n", host, port);
+    plog.printf("[ws] TLS connect to %s:%d failed\n", host, port);
     return -1;
   }
   uint8_t keyRaw[16], key[32];
@@ -105,7 +106,7 @@ int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutM
   size_t cap = c->path.size() + strlen(host) + c->subprotocol.size() + 256;
   char *req = (char *)malloc(cap);
   if (!req) {
-    Serial.printf("[ws] no memory for the upgrade request (%u free)\n", (unsigned)ESP.getMaxAllocHeap());
+    plog.printf("[ws] no memory for the upgrade request (%u free)\n", (unsigned)ESP.getMaxAllocHeap());
     return -1;
   }
   int rl = snprintf(req, cap,
@@ -116,7 +117,7 @@ int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutM
   int w = (rl > 0 && (size_t)rl < cap) ? writeAll(c, (const uint8_t *)req, rl, timeoutMs) : -1;
   free(req);
   if (w < 0) {
-    Serial.println("[ws] sending the upgrade request failed");
+    plog.println("[ws] sending the upgrade request failed");
     return -1;
   }
   // Read the response headers (stop at the blank line; keep anything after it).
@@ -126,12 +127,12 @@ int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutM
   char *end = nullptr;
   while (!(end = (char *)memmem(resp, got, "\r\n\r\n", 4))) {
     if (got >= sizeof resp - 1 || millis() - start > (uint32_t)timeoutMs) {
-      Serial.println("[ws] no upgrade response");
+      plog.println("[ws] no upgrade response");
       return -1;
     }
     int r = esp_transport_read(c->ssl, resp + got, sizeof resp - 1 - got, 1000);
     if (r < 0) {
-      Serial.println("[ws] connection closed during upgrade");
+      plog.println("[ws] connection closed during upgrade");
       return -1;
     }
     got += r;
@@ -142,7 +143,7 @@ int wsConnect(esp_transport_handle_t t, const char *host, int port, int timeoutM
   char *eol = strstr(resp, "\r\n");
   if (eol) *eol = 0;
   if (!strstr(resp, " 101")) {
-    Serial.printf("[ws] upgrade refused: %s\n", resp);
+    plog.printf("[ws] upgrade refused: %s\n", resp);
     return -1;
   }
   return 0;
@@ -170,7 +171,7 @@ int wsRead(esp_transport_handle_t t, char *buf, int len, int timeoutMs) {
     uint8_t mask[4] = {0};
     if (masked && readExact(c, mask, 4, 5000) <= 0) return -1;
     if (op == 0x8) {  // close
-      Serial.println("[ws] server closed the connection");
+      plog.println("[ws] server closed the connection");
       return -1;
     }
     if (op == 0x9 || op == 0xA) {  // ping / pong: control payload ≤ 125

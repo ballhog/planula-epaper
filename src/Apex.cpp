@@ -1,4 +1,5 @@
 #include "Apex.h"
+#include "Log.h"
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -75,10 +76,10 @@ static String resolveLocal(const String &url) {
   if (known.magic != kKnownMagic || strcmp(known.name, name.c_str()) || !known.ip) {
     IPAddress ip = MDNS.queryHost(name.substring(0, name.length() - 6), 3000);
     if ((uint32_t)ip == 0) {
-      Serial.printf("[apex] mDNS: no answer for %s\n", name.c_str());
+      plog.printf("[apex] mDNS: no answer for %s\n", name.c_str());
       return url;  // let the request fail with its own error
     }
-    Serial.printf("[apex] %s is %s\n", name.c_str(), ip.toString().c_str());
+    plog.printf("[apex] %s is %s\n", name.c_str(), ip.toString().c_str());
     known.magic = kKnownMagic;
     strlcpy(known.name, name.c_str(), sizeof known.name);
     known.ip = (uint32_t)ip;
@@ -266,7 +267,7 @@ static void readLogs(const String &host, const String &user, const String &pass)
   int nk = readings::count();
   std::unique_ptr<Acc[]> acc(new (std::nothrow) Acc[nk > 0 ? nk : 1]);
   if (!acc) {
-    Serial.println("[apex] input log: no memory");
+    plog.println("[apex] input log: no memory");
     return;
   }
   int na = 0;
@@ -315,7 +316,7 @@ static void readLogs(const String &host, const String &user, const String &pass)
     if (np >= 2 && readings::setHistory(acc[i].key, pts, np, 0)) filled++;
   }
   acc.reset();
-  Serial.printf("[apex] input log: %d records, %d readings given 24 h history%s%s (newest %ld s ago, %d outside the day)\n",
+  plog.printf("[apex] input log: %d records, %d readings given 24 h history%s%s (newest %ld s ago, %d outside the day)\n",
                 recs, filled, err.length() ? ", " : "", err.c_str(), newest ? (long)nowS - (long)newest : -1L, outside);
 
   // Outputs: on/off changes for the picked Apex outputs.
@@ -362,18 +363,18 @@ static void readLogs(const String &host, const String &user, const String &pass)
     int lanes = 0;
     for (auto &e : evs)
       if (e.n && outlets::setHistory(e.key, e.at, e.lvl, e.n)) lanes++;
-    Serial.printf("[apex] output log: %d records, %d changes for %d picked output(s)%s%s\n", orecs, changes, lanes,
+    plog.printf("[apex] output log: %d records, %d changes for %d picked output(s)%s%s\n", orecs, changes, lanes,
                   err.length() ? ", " : "", err.c_str());
   }
   logsAtS = nowS;
-  Serial.printf("[apex] logs read in %lu ms\n", (unsigned long)(millis() - t0));
+  plog.printf("[apex] logs read in %lu ms\n", (unsigned long)(millis() - t0));
 }
 
 static void pollJob(String host, String user, String pass) {
   int n = 0;
   String err = poll(host, user, pass, true, &n);
   bool good = !err.length();
-  Serial.printf("[apex] poll %s: %s (8-bit free %u, largest %u)\n", host.c_str(),
+  plog.printf("[apex] poll %s: %s (8-bit free %u, largest %u)\n", host.c_str(),
                 good ? (String(n) + " inputs").c_str() : err.c_str(),
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));

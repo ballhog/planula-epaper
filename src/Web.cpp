@@ -1,4 +1,5 @@
 #include "Web.h"
+#include "Log.h"
 
 #include <functional>
 
@@ -256,6 +257,12 @@ void handleTestHydros() {
   startTest(hydrosTest, "hydros-test", [user, pass] { return hydros::test(user, pass); });
 }
 
+void handleLog() {
+  if (!allowed()) return;
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "text/plain; charset=utf-8", logbuf::text());
+}
+
 void handleReadings() {
   if (!allowed()) return;
   JsonDocument d;
@@ -367,7 +374,7 @@ void handleUploadData() {
     upDenied = !authed();
     upError = "";
     if (upDenied) return;
-    Serial.printf("[update] upload %s\n", up.filename.c_str());
+    plog.printf("[update] upload %s\n", up.filename.c_str());
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) upError = Update.errorString();
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (upDenied || upError.length()) return;
@@ -375,7 +382,7 @@ void handleUploadData() {
   } else if (up.status == UPLOAD_FILE_END) {
     if (upDenied || upError.length()) return;
     if (!Update.end(true)) upError = Update.errorString();
-    else Serial.printf("[update] %u bytes written\n", (unsigned)up.totalSize);
+    else plog.printf("[update] %u bytes written\n", (unsigned)up.totalSize);
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
     upError = "upload interrupted";
@@ -417,6 +424,7 @@ void begin() {
   server.on("/api/test/apex", HTTP_GET, [] { testResult(apexTest); });
   server.on("/api/test/hydros", HTTP_GET, [] { testResult(hydrosTest); });
   server.on("/api/readings", HTTP_GET, handleReadings);
+  server.on("/api/log", HTTP_GET, handleLog);
   server.on("/api/page", HTTP_POST, handlePage);
   server.on("/api/refresh", HTTP_POST, handleRefresh);
   server.on("/api/ack", HTTP_POST, [] { if (allowed()) { app::ackAlarm(); ok(); } });

@@ -1,4 +1,5 @@
 #include "Power.h"
+#include "Log.h"
 
 #include "Settings.h"
 
@@ -136,7 +137,7 @@ void goToSleep() {
   uint32_t secs = (uint32_t)max<time_t>(30, at - now);
   rtc.next = why;
   saveState();
-  Serial.printf("[power] sleeping %u s (%s, wake %s)\n", (unsigned)secs,
+  plog.printf("[power] sleeping %u s (%s, wake %s)\n", (unsigned)secs,
                 why == Wake::Daily ? "daily update" : why == Wake::Hourly ? "hourly alarm check" : "saver",
                 clock ? hhmm(at).c_str() : "?");
   Serial.flush();
@@ -193,7 +194,7 @@ void begin() {
   } else {
     awakeUntil = millis() + (c == ESP_SLEEP_WAKEUP_EXT1 ? kAwakeKeyMs : kAwakeBootMs);
   }
-  Serial.printf("[power] %s, woke by %s\n", settings::get().power.c_str(),
+  plog.printf("[power] %s, woke by %s\n", settings::get().power.c_str(),
                 c == ESP_SLEEP_WAKEUP_TIMER ? "timer" : c == ESP_SLEEP_WAKEUP_EXT1 ? "a button" : "power-on/reset");
 }
 
@@ -219,7 +220,7 @@ void loop() {
       else moved = statusChanged = true;
       uint32_t sinceDraw = rtc.drawnAt ? (uint32_t)(time(nullptr) - rtc.drawnAt) : UINT32_MAX;
       draw = rules::shouldRedraw(rtc.next, moved, statusChanged, sinceDraw);
-      Serial.printf("[power] %s wake: %s%s%s -> %s\n",
+      plog.printf("[power] %s wake: %s%s%s -> %s\n",
                     rtc.next == Wake::Daily ? "daily" : rtc.next == Wake::Hourly ? "hourly" : "saver",
                     moved ? "values moved " : "", statusChanged ? "status changed " : "",
                     timedOut ? "(timed out waiting for data) " : "", draw ? "redraw" : "no redraw");
