@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <esp_crt_bundle.h>
 #include <mbedtls/base64.h>
+#include <Preferences.h>
 #include <mqtt_client.h>
 #include <time.h>
 
@@ -50,6 +51,10 @@ String loginErr;
 uint32_t sessionStart = 0, nextTry = 0, backoff = 15000;
 String state = "off", userId;
 String lastLogged;
+// Session built from saved credentials: if it never connects they're dropped.
+bool fromCache = false;
+volatile bool sawConnect = false;
+time_t credExp = 0;  // when the session's AWS credentials run out (0 unknown)
 
 void setState(const String &st) {
   state = st;
@@ -168,12 +173,164 @@ https::Result api(const String &path, const String &idToken, JsonDocument &out, 
                             {{"Authorization", idToken}, {"Content-Type", "application/json"}}, "", out, &filter);
 }
 
+// --- Saved sign-in -----------------------------------------------------------
+// Every battery wake used to sign in from scratch: Cognito login, /user,
+// /thing, GetCredentialsForIdentity, then the IoT socket (four or five TLS
+// handshakes, most of the awake time). The account details (user id,
+// controllers, identity, endpoint) barely change and the AWS credentials are
+// good for an hour, so both are kept in flash (NVS: RTC memory is too small
+// for the ~1.5 kB session token) and reused:
+//   credentials still good   -> straight to the IoT socket (no HTTPS at all)
+//   credentials ran out      -> login + credentials only (skips /user, /thing)
+//   nothing saved / > 1 day  -> the full sign-in
+// Anything that fails with saved data drops it and does the full sign-in.
+struct Saved {
+  String uid, identity, endpoint, region, things;  // things: "id\tname\n"...
+  uint32_t at = 0;                                 // profile saved (epoch s)
+  String ak, sk, tok;
+  uint32_t exp = 0;                                // credentials expire (epoch s)
+};
+const char *kNvs = "hydros";
+
+bool loadSaved(const String &user, Saved &c) {
+  Preferences p;
+  if (!p.begin(kNvs, true)) return false;
+  bool ok = p.getString("user", "") == user;
+  if (ok) {
+    c.uid = p.getString("uid", "");
+    c.identity = p.getString("ident", "");
+    c.endpoint = p.getString("ep", "");
+    c.region = p.getString("reg", "");
+    c.things = p.getString("things", "");
+    c.at = p.getUInt("at", 0);
+    c.ak = p.getString("ak", "");
+    c.sk = p.getString("sk", "");
+    c.tok = p.getString("tok", "");
+    c.exp = p.getUInt("exp", 0);
+  }
+  p.end();
+  return ok && c.uid.length() && c.identity.length() && c.endpoint.length() && c.things.length();
+}
+
+void saveProfile(const String &user, const Saved &c) {
+  Preferences p;
+  if (!p.begin(kNvs, false)) return;
+  p.putString("user", user);
+  p.putString("uid", c.uid);
+  p.putString("ident", c.identity);
+  p.putString("ep", c.endpoint);
+  p.putString("reg", c.region);
+  p.putString("things", c.things);
+  p.putUInt("at", c.at);
+  p.end();
+}
+
+void saveCreds(const Saved &c) {
+  Preferences p;
+  if (!p.begin(kNvs, false)) return;
+  bool fits = c.tok.length() < 3900;  // NVS strings top out at 4000 bytes
+  p.putString("ak", fits ? c.ak : String());
+  p.putString("sk", fits ? c.sk : String());
+  p.putString("tok", fits ? c.tok : String());
+  p.putUInt("exp", fits ? c.exp : 0);
+  p.end();
+}
+
+void forgetCreds() {
+  Preferences p;
+  if (!p.begin(kNvs, false)) return;
+  p.putUInt("exp", 0);
+  p.end();
+}
+
+void forgetAll() {
+  Preferences p;
+  if (!p.begin(kNvs, false)) return;
+  p.clear();
+  p.end();
+}
+
+String thingsText(const std::vector<Thing> &v) {
+  String o;
+  for (auto &t : v) o += t.id + "\t" + t.name + "\n";
+  return o;
+}
+
+std::vector<Thing> thingsFrom(const String &txt) {
+  std::vector<Thing> v;
+  int a = 0;
+  while (a < (int)txt.length()) {
+    int nl = txt.indexOf('\n', a);
+    if (nl < 0) nl = txt.length();
+    int tab = txt.indexOf('\t', a);
+    if (tab > a && tab < nl) v.push_back({txt.substring(a, tab), txt.substring(tab + 1, nl)});
+    a = nl + 1;
+  }
+  return v;
+}
+
+// AWS credentials for the controller's identity. Fills c.ak/sk/tok/exp.
+String getCreds(const Login &L, Saved &c) {
+  JsonDocument cb;
+  cb["IdentityId"] = c.identity;
+  cb["Logins"]["cognito-idp." + L.region + ".amazonaws.com/" + L.pool] = L.idToken;
+  String body;
+  serializeJson(cb, body);
+  https::Result r = https::request("POST", "https://cognito-identity." + c.region + ".amazonaws.com/",
+                                   {{"Content-Type", "application/x-amz-json-1.1"},
+                                    {"X-Amz-Target", "AWSCognitoIdentityService.GetCredentialsForIdentity"}},
+                                   body, 16384);
+  if (r.status != 200) return "AWS credentials refused (HTTP " + String(r.status) + ")";
+  JsonDocument cd;
+  deserializeJson(cd, r.body);
+  c.ak = cd["Credentials"]["AccessKeyId"] | "";
+  c.sk = cd["Credentials"]["SecretKey"] | "";
+  c.tok = cd["Credentials"]["SessionToken"] | "";
+  double exp = cd["Credentials"]["Expiration"] | 0.0;  // epoch seconds
+  c.exp = exp > 1700000000 ? (uint32_t)exp : (uint32_t)time(nullptr) + 50 * 60;
+  if (!c.ak.length() || !c.sk.length()) return "no AWS credentials in reply";
+  return "";
+}
+
+// The signed IoT WebSocket URL, from saved or fresh credentials.
+void useSaved(const Saved &c) {
+  userId = c.uid;
+  things = thingsFrom(c.things);
+  wsHost = c.endpoint;
+  wsPath = sigv4::iotWebsocketPath(c.endpoint.c_str(), c.region.c_str(), c.ak.c_str(), c.sk.c_str(), c.tok.c_str(),
+                                   amzDate().c_str())
+               .c_str();
+  credExp = c.exp;
+}
+
 // Steps 1-4. On success fills things, userId, wsHost, wsPath.
 String connectSteps(const String &user, const String &pass, bool forTest, String *summary) {
   if (!WiFi.isConnected()) return "no Wi-Fi";
   if (time(nullptr) < 1700000000) return "waiting for the clock (NTP)";
+  fromCache = false;
+  Saved c;
+  uint32_t nowS = (uint32_t)time(nullptr);
+  bool saved = !forTest && loadSaved(user, c) && nowS - c.at < 24UL * 3600UL;
+  if (saved && c.ak.length() && c.exp > nowS + 600) {
+    useSaved(c);
+    fromCache = true;
+    Serial.printf("[hydros] saved sign-in (AWS credentials good for %u more min)\n", (unsigned)((c.exp - nowS) / 60));
+    return "";
+  }
   Login L = login(user, pass);
   if (L.error.length()) return L.error;
+  if (saved) {
+    String e = getCreds(L, c);
+    if (!e.length()) {
+      useSaved(c);
+      saveCreds(c);
+      fromCache = true;
+      Serial.printf("[hydros] signed in with the saved account details (new AWS credentials)\n");
+      return "";
+    }
+    Serial.printf("[hydros] saved account details didn't work (%s); full sign-in\n", e.c_str());
+    forgetAll();
+  }
 
   JsonDocument ud;
   https::Result u = api("/user", L.idToken, ud, true);
@@ -234,26 +391,18 @@ String connectSteps(const String &user, const String &pass, bool forTest, String
     if (dot > 0) region = endpoint.substring(iot + 5, dot);
   }
 
-  JsonDocument cb;
-  cb["IdentityId"] = identity;
-  cb["Logins"]["cognito-idp." + L.region + ".amazonaws.com/" + L.pool] = L.idToken;
-  String body;
-  serializeJson(cb, body);
-  https::Result c = https::request("POST", "https://cognito-identity." + region + ".amazonaws.com/",
-                                   {{"Content-Type", "application/x-amz-json-1.1"},
-                                    {"X-Amz-Target", "AWSCognitoIdentityService.GetCredentialsForIdentity"}},
-                                   body, 16384);
-  if (c.status != 200) return "AWS credentials refused (HTTP " + String(c.status) + ")";
-  JsonDocument cd;
-  deserializeJson(cd, c.body);
-  String ak = cd["Credentials"]["AccessKeyId"] | "", sk = cd["Credentials"]["SecretKey"] | "",
-         tok = cd["Credentials"]["SessionToken"] | "";
-  if (!ak.length() || !sk.length()) return "no AWS credentials in reply";
-
-  wsHost = endpoint;
-  wsPath = sigv4::iotWebsocketPath(endpoint.c_str(), region.c_str(), ak.c_str(), sk.c_str(), tok.c_str(),
-                                   amzDate().c_str())
-               .c_str();
+  Saved n;
+  n.uid = uid;
+  n.identity = identity;
+  n.endpoint = endpoint;
+  n.region = region;
+  n.things = thingsText(top);
+  n.at = (uint32_t)time(nullptr);
+  String e = getCreds(L, n);
+  if (e.length()) return e;
+  useSaved(n);
+  saveProfile(user, n);
+  saveCreds(n);
   return "";
 }
 
@@ -410,6 +559,7 @@ void onEvent(void *, esp_event_base_t, int32_t id, void *data) {
   switch ((esp_mqtt_event_id_t)id) {
     case MQTT_EVENT_CONNECTED:
       connected = true;
+      sawConnect = true;
       lastMsg = millis();
       Serial.printf("[hydros] AWS IoT connected (%s), asking %u controller(s) for status\n", wsHost.c_str(),
                     (unsigned)things.size());
@@ -570,6 +720,7 @@ void loginFinished(uint32_t now) {
     return;
   }
   holdsTls = true;
+  sawConnect = false;
   Serial.printf("[hydros] signed in; %u controller(s), first %s; opening wss://%s (request %u bytes)\n",
                 (unsigned)things.size(), things.empty() ? "-" : things[0].name.c_str(), wsHost.c_str(),
                 (unsigned)wsPath.length());
@@ -612,10 +763,19 @@ void loop() {
     // Signed differences: lastMsg is written by the MQTT task and can be a
     // little newer than `now`; unsigned it would wrap to "silent for 49 days".
     int32_t sinceStart = rules::since(now, sessionStart), sinceMsg = rules::since(now, lastMsg);
-    bool expired = sinceStart > (int32_t)kRebuildMs;
+    // Saved credentials can have less than the usual hour left: renew 2 min
+    // before they run out.
+    bool expired = sinceStart > (int32_t)kRebuildMs || (credExp && time(nullptr) + 120 > credExp);
     bool silent = connected && sinceMsg > (int32_t)kSilentMs;
     bool dropped = !connected && sinceStart > 30000;
     if (expired || silent || dropped) {
+      if (dropped && fromCache && !sawConnect) {
+        Serial.println("[hydros] saved AWS credentials refused; signing in again");
+        forgetCreds();
+        fromCache = false;
+        dropped = false;  // not a network problem: sign in again now, no backoff
+        expired = true;
+      }
       stopClient();
       setState(expired ? "renewing login" : silent ? "no data for 10 min, reconnecting" : "connection dropped, retrying");
       nextTry = now + (dropped ? backoff : 1000);

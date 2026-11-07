@@ -359,6 +359,10 @@ void factoryReset() {
     p.clear();
     p.end();
   }
+  if (p.begin("hydros", false)) {  // saved Hydros sign-in (Hydros.cpp)
+    p.clear();
+    p.end();
+  }
   s = Settings();
   s.apPass = ap;
   if (s.apPass.length() >= 8) {

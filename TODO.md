@@ -58,7 +58,7 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
   Apex data log and outlet log (`/rest/ilog`, `/rest/olog`) on each wake for
   true 24 h sparklines and an accurate Outlets timeline. Find whether Hydros's
   cloud API has the same.
-- [ ] **10. Hydros: don't sign in from scratch on every wake.** Each wake did
+- [x] **10. Hydros: don't sign in from scratch on every wake.** Each wake did
   Cognito login, `/user`, `/thing`, GetCredentialsForIdentity, then the IoT
   socket: four or five TLS handshakes. Keep the account details and the AWS
   credentials (good for ~1 h) and reuse them.
