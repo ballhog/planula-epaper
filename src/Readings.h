@@ -53,6 +53,10 @@ bool get(const String &key, Reading &out);
 int count();
 bool at(int i, Reading &out);
 void clearSource(const char *source);
+// Replace a known reading's 24 h trend with history from the controller's own
+// log (oldest first, one point per 30 min, ending with the slot now running).
+// False if the key isn't in the table yet.
+bool setHistory(const String &key, const float *pts, int n, uint32_t slotAgeMs);
 // Put back a reading saved across deep sleep (times already rebased to millis()).
 void restore(const Reading &r);
 

@@ -156,4 +156,55 @@ void apexOutput(const char *st, const char *type, bool &on, bool &manual, bool &
   hidden = !strcmp(type, "virtual") || !strcmp(type, "alert") || !strcmp(type, "serial");
 }
 
+uint32_t apexDate(double num, const char *str) {
+  if (num > 1000000000.0) return (uint32_t)num;
+  if (!str) return 0;
+  while (*str == ' ') str++;
+  // All digits: epoch as a string, or YYYYMMDDHHMM.
+  size_t len = 0;
+  while (isdigit((unsigned char)str[len])) len++;
+  if (len >= 12) {
+    struct tm tm = {};
+    char b[5] = {0};
+    memcpy(b, str, 4);
+    tm.tm_year = atoi(b) - 1900;
+    char d2[3] = {0};
+    memcpy(d2, str + 4, 2); tm.tm_mon = atoi(d2) - 1;
+    memcpy(d2, str + 6, 2); tm.tm_mday = atoi(d2);
+    memcpy(d2, str + 8, 2); tm.tm_hour = atoi(d2);
+    memcpy(d2, str + 10, 2); tm.tm_min = atoi(d2);
+    tm.tm_isdst = -1;
+    time_t t = mktime(&tm);
+    return t > 0 ? (uint32_t)t : 0;
+  }
+  if (len >= 9) return (uint32_t)strtoul(str, nullptr, 10);
+  return 0;
+}
+
+int slotFor(uint32_t t, uint32_t nowS, int slots, uint32_t slotS) {
+  if (t > nowS) return t - nowS < 300 ? slots - 1 : -1;  // a clock a little ahead
+  uint32_t ago = nowS - t;
+  uint32_t k = ago / slotS;
+  if (k >= (uint32_t)slots) return -1;
+  return slots - 1 - (int)k;
+}
+
+int slotPoints(const float *sum, const uint16_t *n, int slots, float *out) {
+  int m = 0;
+  float last = NAN;
+  for (int i = 0; i < slots; i++) {
+    if (n[i]) last = sum[i] / n[i];
+    else if (isnan(last)) continue;
+    out[m++] = last;
+  }
+  return m;
+}
+
+bool apexOn(const char *st) {
+  if (!st) return false;
+  if (!strcmp(st, "ON") || !strcmp(st, "AON") || !strcmp(st, "TBL")) return true;
+  if (isdigit((unsigned char)st[0])) return atoi(st) > 0;  // some firmware logs 0 / 1
+  return false;
+}
+
 }  // namespace rules

@@ -163,6 +163,28 @@ String unitFor(const String &kind) {
   return "";
 }
 
+bool setHistory(const String &key, const float *pts, int np, uint32_t slotAgeMs) {
+  if (np <= 0) return false;
+  Lock l;
+  for (int i = 0; i < n; i++) {
+    Reading &r = items[i];
+    if (strcmp(r.key, key.c_str())) continue;
+    if (np > panel::kSparkLen) {
+      pts += np - panel::kSparkLen;
+      np = panel::kSparkLen;
+    }
+    for (int k = 0; k < np; k++) r.spark[k] = toHalf(pts[k]);
+    r.nspark = (uint8_t)np;
+    // The newest slot keeps running from here on live values.
+    r.slotStartMs = millis() - slotAgeMs;
+    r.slotSum = pts[np - 1];
+    r.slotN = 1;
+    nVersion = nVersion + 1;
+    return true;
+  }
+  return false;
+}
+
 void restore(const Reading &in) {
   Lock l;
   for (int i = 0; i < n; i++)

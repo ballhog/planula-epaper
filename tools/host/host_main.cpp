@@ -492,8 +492,45 @@ static Gauge gauge(const char *label, const char *unit, float v, uint8_t dec, St
   return g;
 }
 
+static void testHistory() {
+  using namespace rules;
+  // Apex log dates: epoch numbers (AOS 5.x) and classic local YYYYMMDDHHMM strings
+  CHECK(apexDate(1762525579.0, nullptr) == 1762525579u);
+  CHECK(apexDate(0, "1762525579") == 1762525579u);
+  CHECK(apexDate(0, "") == 0);
+  CHECK(apexDate(0, "garbage") == 0);
+  {
+    struct tm tm = {};
+    tm.tm_year = 2026 - 1900; tm.tm_mon = 10; tm.tm_mday = 7; tm.tm_hour = 9; tm.tm_min = 26; tm.tm_isdst = -1;
+    CHECK(apexDate(0, "202611070926") == (uint32_t)mktime(&tm));
+  }
+  // slots: 48 x 30 min ending now
+  uint32_t now = 1762525579u;
+  CHECK(slotFor(now, now, 48, 1800) == 47);
+  CHECK(slotFor(now - 1799, now, 48, 1800) == 47);
+  CHECK(slotFor(now - 1800, now, 48, 1800) == 46);
+  CHECK(slotFor(now - 48 * 1800 + 1, now, 48, 1800) == 0);
+  CHECK(slotFor(now - 48 * 1800, now, 48, 1800) == -1);  // older than the day
+  CHECK(slotFor(now + 60, now, 48, 1800) == 47);          // Apex clock a minute ahead
+  CHECK(slotFor(now + 3600, now, 48, 1800) == -1);        // an hour ahead: wrong clock
+  // slot means -> points: leading gaps dropped, later gaps carried forward
+  float sum[6] = {0, 0, 16.2f, 0, 8.0f, 24.6f};
+  uint16_t cnt[6] = {0, 0, 2, 0, 1, 3};
+  float pts[6];
+  int np = slotPoints(sum, cnt, 6, pts);
+  CHECK(np == 4);
+  CHECK(fabsf(pts[0] - 8.1f) < 1e-4f && fabsf(pts[1] - 8.1f) < 1e-4f);
+  CHECK(fabsf(pts[2] - 8.0f) < 1e-4f && fabsf(pts[3] - 8.2f) < 1e-4f);
+  uint16_t none[3] = {0, 0, 0};
+  CHECK(slotPoints(sum, none, 3, pts) == 0);
+  // output log states
+  CHECK(apexOn("ON") && apexOn("AON") && apexOn("TBL") && apexOn("1"));
+  CHECK(!apexOn("OFF") && !apexOn("AOF") && !apexOn("0") && !apexOn(nullptr));
+}
+
 static void testRules() {
   using namespace rules;
+  testHistory();
   // signed elapsed time: a stamp a little newer than "now" is not 49 days old
   CHECK(since(1000, 1500) < 0);
   CHECK(since(5000, 1000) == 4000);

@@ -107,6 +107,24 @@ void update(const char *key, const char *source, const char *type, uint8_t level
     if (Hist *h = histFor(key, true)) h->h.record(now, o->level);
 }
 
+bool isPicked(const char *key) { return picked(key); }
+
+bool setHistory(const char *key, const uint32_t *atS, const uint8_t *level, int nIn) {
+  uint32_t now = clockMs();
+  if (!now || !picked(key)) return false;
+  Lock l;
+  Hist *h = histFor(key, true);
+  if (!h) return false;
+  char k[sizeof h->key];
+  strlcpy(k, h->key, sizeof k);
+  memset(h, 0, sizeof *h);
+  strlcpy(h->key, k, sizeof h->key);
+  for (int i = 0; i < nIn; i++) h->h.record((uint32_t)((uint64_t)atS[i] * 1000u), level[i] > 100 ? 100 : level[i]);
+  for (int i = 0; i < n; i++)
+    if (!strcmp(items[i].key, key)) h->h.record(now, items[i].level);
+  return true;
+}
+
 int count() {
   Lock l;
   return n;

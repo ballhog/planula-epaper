@@ -75,4 +75,22 @@ uint8_t hydrosLevel(float valueState, float drain, float fill, bool doser);
 // Apex output status[0] / type -> on, by hand, hidden from the picker.
 void apexOutput(const char *status0, const char *type, bool &on, bool &manual, bool &hidden);
 
+// ── controller history (Apex /rest/ilog, /rest/olog) ──────────────────────
+
+// An Apex log date as epoch seconds: a number is already epoch (AOS 5.x); a
+// "YYYYMMDDHHMM" string (classic firmware) is local time. 0 = unreadable.
+uint32_t apexDate(double num, const char *str);
+
+// Which 30-min slot of the 24 h ending at nowS a time falls in: 0 = oldest,
+// slots-1 = the slot that ends at now. -1 when outside.
+int slotFor(uint32_t t, uint32_t nowS, int slots, uint32_t slotS);
+
+// Slot means (sum / n) -> sparkline points, oldest first. Leading empty slots
+// are dropped (the log may start later); empty slots after the first carry the
+// previous value forward. Returns the number of points.
+int slotPoints(const float *sum, const uint16_t *n, int slots, float *out);
+
+// "ON" / "AON" / "TBL" ... -> on (Apex output log states).
+bool apexOn(const char *state);
+
 }  // namespace rules

@@ -33,6 +33,12 @@ int count();
 bool at(int i, Out &out);
 bool get(const String &key, Out &out);
 const char *nameOf(const char *key);  // the part after "source:"
+// Replace a picked output's history with the controller's own log: changes
+// as (epoch seconds, level 0-100), oldest first. The current state is added
+// after them. False if the output isn't picked.
+bool setHistory(const char *key, const uint32_t *atS, const uint8_t *level, int n);
+// Is this output picked for the Outlets page.
+bool isPicked(const char *key);
 
 // The Outlets page as timeline lanes, 12 h up to now. Lane per output kind:
 // dosing heads = a mark per dose, dimmable outputs = their level (%),
