@@ -228,7 +228,14 @@ async function loadSettings(){
  $('hydrosPass').placeholder=C.hydros.pass.set?'saved — leave blank to keep':'';
  const d=C.display;$('tz').value=d.tz;if($('tz').value!==d.tz){const o=new Option(d.tz,d.tz);$('tz').add(o);$('tz').value=d.tz}
  $('rotate').value=d.rotate_s;$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';
- {const K=C.keys||{};$('keysBox').style.display=(C.power||{}).battery?'':'none';$('key_left').value=K.left||'prev';$('key_middle').value=K.middle||'view';
+ {const K=C.keys||{};
+  // One option per page: "Go to page 2 · Chemistry (and back)"
+  const names=[];const np=Math.max((C.pages||[]).length,...(C.gauges||[]).map(g=>(g.page||0)+1),0);
+  for(let i=0;i<Math.min(np,6);i++)names.push((C.pages||[])[i]?.title||('Page '+(i+1)));
+  if((C.outlets||[]).length&&names.length<6)names.push('Outlets');
+  for(const k of ['left','middle','right']){const el=$('key_'+k);el.querySelectorAll('.pg').forEach(o=>o.remove());
+   names.forEach((n,i)=>{const o=document.createElement('option');o.className='pg';o.value='page'+(i+1);o.textContent=`Go to page ${i+1} · ${n} (and back)`;el.insertBefore(o,el.querySelector('option[value=refresh]'))})}
+  $('keysBox').style.display=(C.power||{}).battery?'':'none';$('key_left').value=K.left||'prev';$('key_middle').value=K.middle||'view';
   $('key_right').value=K.right||'next';$('key_ack').value=K.ack||'middle'}
  {const P=C.power||{};$('powerBox').style.display=P.battery?'':'none';$('pwMode').value=P.mode||'live';$('pwEvery').value=P.every_min||10;
   $('pwDaily').value=P.daily_at||'07:00';$('pwHourly').checked=P.hourly_check!==false;pwShow()}$('tempF').checked=d.temp_f;$('stale').value=Math.round(d.stale_s/60);

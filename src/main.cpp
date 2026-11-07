@@ -641,6 +641,7 @@ void keys() {
     else if (action == "next") app::nextPage();
     else if (action == "view") app::cycleView();
     else if (action == "schedule") app::toggleSchedule();
+    else if (action.startsWith("page")) app::togglePage(action.substring(4).toInt() - 1);
     else if (action == "refresh") {
       apex::pollNow();
       app::redraw(true);
@@ -860,6 +861,17 @@ void gotoPage(int n) {
   redrawAsked = true;
 }
 void nextPage() { gotoPage(nPages ? (curPage + 1) % nPages : 0); }
+// A button for one page: there, and pressed again back to where you were.
+void togglePage(int n) {
+  static int back = 0;
+  if (n < 0 || n >= nPages) return;
+  if (curPage == n) gotoPage(back);
+  else {
+    back = curPage;
+    gotoPage(n);
+  }
+}
+
 // The Outlets (direct) or Schedule (Coeno) page, i.e. the first timeline page;
 // pressed again, back to where you were.
 void toggleSchedule() {
