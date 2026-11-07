@@ -269,6 +269,38 @@ static void sparkMinMax(const Gauge &g, char *lo, char *hi, size_t n) {
   formatValue(t, hi, n);
 }
 
+int trendDir(const Gauge &g) {
+  if (!g.has || g.nspark < 4 || g.lane != Lane::Level) return 0;
+  int back = g.nspark - 1 - 6;  // 6 x 30 min
+  if (back < 0) back = 0;
+  float was = g.spark[back];
+  if (isnan(was) || isnan(g.value)) return 0;
+  float delta = g.value - was;
+  float thr;
+  if (g.hasRange && g.hi > g.lo) thr = (g.hi - g.lo) * 0.1f;
+  else {
+    float step = 5.0f * powf(10.0f, -(float)g.dec);
+    thr = fmaxf(step, fabsf(g.value) * 0.01f);
+  }
+  if (delta >= thr) return 1;
+  if (delta <= -thr) return -1;
+  return 0;
+}
+
+// A solid arrow, sz px tall, bottom-left at (x, y).
+static void trendArrow(Adafruit_GFX &d, int x, int y, int sz, int dir, uint16_t c) {
+  int hw = sz / 2;  // head half-width
+  int cx = x + hw;
+  int shaft = sz / 6 < 3 ? 3 : sz / 6;
+  if (dir > 0) {
+    d.fillTriangle(cx, y - sz, x, y - sz + hw, x + 2 * hw, y - sz + hw, c);
+    d.fillRect(cx - shaft / 2, y - sz + hw, shaft, sz - hw, c);
+  } else {
+    d.fillTriangle(cx, y, x, y - hw, x + 2 * hw, y - hw, c);
+    d.fillRect(cx - shaft / 2, y - sz, shaft, sz - hw, c);
+  }
+}
+
 void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, VFont vfShared, View view) {
   bool alarm = g.status == Status::Alarm;
   uint16_t fg = alarm ? PAPER : INK, bg = alarm ? INK : PAPER;
@@ -298,7 +330,8 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, VFont vfS
     else snprintf(meta, sizeof meta, "%s", age);
     rightW = drawText(d, font::Small, x + w - pad, ly, meta, fg, Right);
   }
-  drawTextFit(d, lf, x + pad, ly, g.label, fg, w - 2 * pad - rightW - 10);
+  int lw = drawTextFit(d, lf, x + pad, ly, g.label, fg, w - 2 * pad - rightW - 24);
+  if (g.moved) d.fillCircle(x + pad + lw + 9, ly - la / 2 + 1, 4, fg);  // changed since the last look
 
   // Value + unit.
   char val[16];
@@ -318,6 +351,8 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, VFont vfS
     int base = top + (bottom - top - va) / 2 + va;
     drawText(d, vf, x + w / 2, base, val, fg, Center);
     if (g.unit[0]) drawText(d, nuf, x + w - pad, y + h - pad, g.unit, fg, Right);
+    // No trend line in this view: an arrow in the lower-left says where it's heading.
+    if (int dir = trendDir(g)) trendArrow(d, x + pad, y + h - pad, ua + 4, dir, fg);
     return;
   }
   int va = ascent(vf);
@@ -824,6 +859,8 @@ void timeline(Adafruit_GFX &d, const Page &p) {
 }
 
 }  // namespace
+
+int trendOf(const Gauge &g) { return trendDir(g); }
 
 void gridFor(const Page &p, int &cols, int &rows) {
   int n = p.n;

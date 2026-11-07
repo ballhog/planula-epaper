@@ -273,6 +273,7 @@ void draw() {
       scene = message(title, body, net::ip(), c);
       screen = title;
     } else {
+      power::markMoved(*p);
       scene = [p, c](Adafruit_GFX &d) { panel::render(d, *p, c); };
       // The view is part of the screen: switching it redraws with a full refresh.
       screen = "page:" + String(curPage) + ":" + String(p->n) + ":" + String(nPages) + ":" + panel::viewName(p->view);

@@ -59,7 +59,15 @@ struct Gauge {
   // "now", negative = past), oldest first.
   Lane lane = Lane::Level;
   int16_t t[kSparkLen];
+  // Battery modes: moved since the screen was last drawn (a small dot by the label).
+  bool moved = false;
 };
+
+// Where the value is heading: +1 up, -1 down, 0 steady or not enough trend.
+// Compares the value with ~3 h ago on the sparkline; "steady" unless it moved
+// by a tenth of the normal band (or, without one, 1 % / five steps of the
+// last shown decimal).
+int trendOf(const Gauge &g);
 
 struct Page {
   char title[28] = "";

@@ -219,6 +219,19 @@ static void samples() {
       if (qn.g[k].status == Status::Alarm) qn.g[k].status = Status::Warn;
     qn.view = View::Numbers;
     shot(cv, "21-chem-3x2-numbers", [&](Adafruit_GFX &d) { render(d, qn, c); });
+    // Trend arrows and "moved since the last look" dots (battery modes).
+    Page qa = qn;
+    for (int k = 0; k < qa.n; k++) {
+      Gauge &g = qa.g[k];
+      if (!g.has || g.nspark < 7) continue;
+      float base = g.spark[g.nspark - 7];
+      float span = g.hasRange ? (g.hi - g.lo) : fabsf(base) * 0.05f + 0.5f;
+      if (k % 3 == 0) g.value = base + span * 0.3f;
+      else if (k % 3 == 1) g.value = base - span * 0.3f;
+      else g.value = base;
+      g.moved = k % 2 == 0;
+    }
+    shot(cv, "24-numbers-trend", [&](Adafruit_GFX &d) { render(d, qa, c); });
   }
   {
     Page qg = q;
@@ -547,9 +560,52 @@ static void testHistory() {
   CHECK(!apexOn("OFF") && !apexOn("AOF") && !apexOn("0") && !apexOn(nullptr));
 }
 
+static void testTrend() {
+  using namespace panel;
+  Gauge g;
+  g.has = true;
+  g.dec = 2;
+  g.nspark = 10;
+  for (int i = 0; i < 10; i++) g.spark[i] = 8.10f;
+  g.value = 8.12f;
+  CHECK(trendOf(g) == 0);  // +0.02 pH: steady (step 0.05)
+  g.value = 8.20f;
+  CHECK(trendOf(g) == 1);
+  g.value = 8.00f;
+  CHECK(trendOf(g) == -1);
+  g.hasRange = true;
+  g.lo = 7.9f;
+  g.hi = 8.4f;  // band 0.5 -> threshold 0.05
+  g.value = 8.14f;
+  CHECK(trendOf(g) == 0);
+  g.value = 8.16f;
+  CHECK(trendOf(g) == 1);
+  g.nspark = 3;
+  CHECK(trendOf(g) == 0);  // not enough trend yet
+  // moved marks: only against the same page
+  Page p;
+  p.n = 2;
+  p.g[0] = g;
+  p.g[0].value = 8.10f;
+  PANEL_COPY(p.g[0].label, "pH");
+  p.g[1].has = true;
+  p.g[1].value = 25.0f;
+  PANEL_COPY(p.g[1].unit, "°C");
+  rules::Drawn d = {};
+  rules::remember(p, 1, d);
+  p.g[0].value = 8.20f;  // moved 0.1 (step 0.02)
+  p.g[1].value = 25.05f; // under 0.1 °C
+  rules::markMoved(p, 1, d);
+  CHECK(p.g[0].moved && !p.g[1].moved);
+  p.g[0].moved = false;
+  rules::markMoved(p, 2, d);
+  CHECK(!p.g[0].moved);
+}
+
 static void testRules() {
   using namespace rules;
   testHistory();
+  testTrend();
   // signed elapsed time: a stamp a little newer than "now" is not 49 days old
   CHECK(since(1000, 1500) < 0);
   CHECK(since(5000, 1000) == 4000);

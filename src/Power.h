@@ -9,9 +9,11 @@
 //
 // Any button wakes the panel: fresh readings, the settings page answers, and it
 // stays awake 2 min after the last button press or web request. In battery modes
-// the screen shows "Readings from 7:02" instead of a running clock.
+// the screen shows "Updated 7:02" instead of a running clock.
 #pragma once
 #include <Arduino.h>
+
+#include "Model.h"
 
 namespace power {
 
@@ -22,5 +24,7 @@ bool quiet();       // timer wake: no drawing until power decides
 void touch();       // a button or web request: stay awake a while
 String nextWakeText();  // "8:00" ("" when live)
 String status();    // for the status card
+// Battery modes: mark the gauges that moved since the screen was last drawn.
+void markMoved(panel::Page &p);
 
 }  // namespace power

@@ -35,6 +35,10 @@ void remember(const panel::Page &p, uint8_t page, Drawn &d);
 // statusChanged: any gauge's status differs. A different page counts as both.
 void compare(const panel::Page &p, uint8_t page, const Drawn &d, bool &moved, bool &statusChanged);
 
+// Set Gauge.moved on the gauges that moved by their step (or appeared / went
+// missing) since `d` was drawn. Nothing is marked when it was another page.
+void markMoved(panel::Page &p, uint8_t page, const Drawn &d);
+
 enum class Wake : uint8_t { None, Saver, Daily, Hourly };
 // Saver: on movement, a status change, or an hour since the last draw.
 // Daily: always. Hourly check: only on a status change.

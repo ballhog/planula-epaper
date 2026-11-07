@@ -49,6 +49,15 @@ void compare(const panel::Page &p, uint8_t page, const Drawn &d, bool &moved, bo
   }
 }
 
+void markMoved(panel::Page &p, uint8_t page, const Drawn &d) {
+  if (d.n != p.n || d.page != page) return;
+  for (int i = 0; i < p.n; i++) {
+    panel::Gauge &g = p.g[i];
+    float was = d.vals[i];
+    g.moved = (g.has != !isnan(was)) || (g.has && fabsf(g.value - was) >= redrawStep(g) - 1e-6f);
+  }
+}
+
 bool shouldRedraw(Wake why, bool moved, bool statusChanged, uint32_t secondsSinceDraw) {
   if (why == Wake::Daily) return true;
   if (why == Wake::Hourly) return statusChanged;

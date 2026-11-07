@@ -67,7 +67,7 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
 - [x] **12. Honest room temperature.** (Reading at boot/wake was already first, before Wi-Fi; added the correction setting.) The SHT4x sits by the ESP32 and reads
   warm once awake. Read it first thing on a wake, before Wi-Fi heats the
   board, and add an offset setting.
-- [ ] **13. Glance cues.** A trend arrow (↑ ↓) on the Numbers view; a small mark
+- [x] **13. Glance cues.** A trend arrow (↑ ↓) on the Numbers view; a small mark
   on tiles that moved since the last refresh.
 - [ ] **14. Product polish.** Host tests on real saved Apex / Hydros replies;
   drop the Hydros boot dumps (item 7); setup that doesn't need the USB log.
