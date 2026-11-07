@@ -284,7 +284,9 @@ void handleOutlets() {
   for (int i = 0; outlets::at(i, o); i++) {
     JsonObject j = a.add<JsonObject>();
     j["key"] = o.key;
-    j["name"] = outlets::nameOf(o.key);
+    // A String, not the pointer: ArduinoJson 7 keeps const char* by reference,
+    // and o is reused (every row showed the last name, or nothing).
+    j["name"] = String(outlets::nameOf(o.key));
     j["source"] = o.source;
     j["type"] = o.type;
     j["hidden"] = o.hidden;
@@ -417,6 +419,7 @@ void begin() {
   server.on("/api/page", HTTP_POST, handlePage);
   server.on("/api/refresh", HTTP_POST, handleRefresh);
   server.on("/api/ack", HTTP_POST, [] { if (allowed()) { app::ackAlarm(); ok(); } });
+  server.on("/api/view", HTTP_POST, [] { if (allowed()) { app::cycleView(); ok(); } });
   server.on("/api/identify", HTTP_POST, [] { if (allowed()) { app::identify(); ok(); } });
   server.on("/api/update/check", HTTP_POST, [] { if (allowed()) { app::checkUpdateSoon(); ok("checking"); } });
   server.on("/api/update/install", HTTP_POST, [] { if (allowed()) { app::installUpdateSoon(); ok("installing"); } });

@@ -619,14 +619,37 @@ void keys() {
   }
 
   bool infoUp = infoUntil && now < infoUntil;
-  if (eL && !keyLeft.down && !keyLeft.longDone) {
-    if (infoUp) infoUntil = 0, app::redraw(false);
-    else app::prevPage();
-  }
-  if (eR && !keyRight.down && !keyRight.longDone) {
-    if (infoUp) infoUntil = 0, app::redraw(false);
-    else app::nextPage();
-  }
+  // Short presses do what Display → Buttons says; holds are fixed.
+  auto shortPress = [&](const String &action, bool isMiddle) {
+    const Settings &s = settings::get();
+    bool ackHere = s.keyAck == "any" || isMiddle;
+    if (ackHere && !alarms.empty() && !acked) {
+      app::ackAlarm();
+      return;
+    }
+    if (infoUp) {  // on the System screen the buttons close it (middle installs)
+      if (isMiddle && availBuild > 0 && coenoLinked()) {
+        app::installUpdateSoon();
+        infoUntil = now + 120000;
+      } else {
+        infoUntil = 0;
+      }
+      app::redraw(false);
+      return;
+    }
+    if (action == "prev") app::prevPage();
+    else if (action == "next") app::nextPage();
+    else if (action == "view") app::cycleView();
+    else if (action == "refresh") {
+      apex::pollNow();
+      app::redraw(true);
+    } else if (action == "info") {
+      infoUntil = now + 120000;
+      app::redraw(false);
+    }
+  };
+  if (eL && !keyLeft.down && !keyLeft.longDone) shortPress(settings::get().keyLeft, false);
+  if (eR && !keyRight.down && !keyRight.longDone) shortPress(settings::get().keyRight, false);
   if (eM && !keyMid.down && !keyMid.longDone) {
     uint32_t held = now - keyMid.at;
     if (held >= 10000) {
@@ -636,18 +659,8 @@ void keys() {
       if (infoUp && coenoLinked()) app::checkUpdateSoon();
       infoUntil = now + 120000;
       app::redraw(false);
-    } else if (infoUp) {
-      if (availBuild > 0 && coenoLinked()) {
-        app::installUpdateSoon();
-        infoUntil = now + 120000;
-      } else {
-        infoUntil = 0;
-      }
-      app::redraw(false);
-    } else if (!alarms.empty() && !acked) {
-      app::ackAlarm();
     } else {
-      app::cycleView();
+      shortPress(settings::get().keyMid, true);
     }
   }
 }

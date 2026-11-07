@@ -79,6 +79,11 @@ void toJson(JsonObject o, bool with) {
 #else
   pw["battery"] = false;
 #endif
+  JsonObject k = o["keys"].to<JsonObject>();
+  k["left"] = s.keyLeft;
+  k["middle"] = s.keyMid;
+  k["right"] = s.keyRight;
+  k["ack"] = s.keyAck;
   JsonObject d = o["display"].to<JsonObject>();
   d["tz"] = s.tz;
   d["clock24"] = s.clock24;
@@ -192,6 +197,21 @@ String applyJson(JsonObjectConst o) {
       if (t.length() == 5 && t[2] == ':' && t.substring(0, 2).toInt() < 24 && t.substring(3).toInt() < 60) s.dailyAt = t;
     }
     if (pw["hourly_check"].is<bool>()) s.hourlyCheck = pw["hourly_check"];
+  }
+  if (o["keys"].is<JsonObjectConst>()) {
+    JsonObjectConst k = o["keys"];
+    auto act = [](JsonVariantConst v, String &dst) {
+      if (!v.is<const char *>()) return;
+      String a = v.as<const char *>();
+      if (a == "prev" || a == "next" || a == "view" || a == "refresh" || a == "info" || a == "none") dst = a;
+    };
+    act(k["left"], s.keyLeft);
+    act(k["middle"], s.keyMid);
+    act(k["right"], s.keyRight);
+    if (k["ack"].is<const char *>()) {
+      String a = k["ack"].as<const char *>();
+      if (a == "middle" || a == "any") s.keyAck = a;
+    }
   }
   if (o["display"].is<JsonObjectConst>()) {
     JsonObjectConst d = o["display"];

@@ -64,6 +64,9 @@ struct Settings {
   String dailyAt = "07:00";
   bool hourlyCheck = true;
   bool buzzer = true;
+  // reTerminal short presses: prev | next | view | refresh | info | none.
+  String keyLeft = "prev", keyMid = "view", keyRight = "next";
+  String keyAck = "middle";  // which press acknowledges an alarm first: middle | any
   std::vector<OutletCfg> outlets;  // Outlets page lanes, in order (max 8)  // reTerminal: beep on a new alarm and every 5 min until acknowledged
   String view = "both";  // both | numbers | graphs (tile view; a button cycles it on the reTerminal)
   bool tempF = false;        // direct mode: show temperatures in °F
