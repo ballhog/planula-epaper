@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 
+#include "Net.h"
 #include "Outlets.h"
 #include "Rules.h"
 #include "Readings.h"
@@ -21,6 +22,17 @@ static volatile bool force = true, okNow = false;
 static SharedText state("not set up");
 static volatile int inputs = 0;
 static int8_t shown = -1;  // idle text on screen (-1 none): don't rewrite it every loop
+static volatile uint8_t fails = 0;  // polls failed in a row: retry sooner than poll_s
+
+// The Apex's address from mDNS, kept through battery sleeps so a wake doesn't
+// spend a query on it. Cleared when a request to it fails (it may have moved).
+struct Resolved {
+  uint32_t magic;
+  char name[40];
+  uint32_t ip;
+};
+RTC_DATA_ATTR static Resolved known;
+constexpr uint32_t kKnownMagic = 0xA9E70001;
 
 static float parseValue(JsonVariantConst v) {
   if (v.is<float>() || v.is<int>()) return v.as<float>();
@@ -55,21 +67,18 @@ static String resolveLocal(const String &url) {
   while (b < (int)url.length() && url[b] != ':' && url[b] != '/') b++;
   String name = url.substring(a, b);
   if (!name.endsWith(".local")) return url;
-  static String lastName;
-  static IPAddress lastIp;
-  static uint32_t lastAt = 0;
-  if (name != lastName || !lastAt || millis() - lastAt > 600000) {
+  if (known.magic != kKnownMagic || strcmp(known.name, name.c_str()) || !known.ip) {
     IPAddress ip = MDNS.queryHost(name.substring(0, name.length() - 6), 3000);
     if ((uint32_t)ip == 0) {
       Serial.printf("[apex] mDNS: no answer for %s\n", name.c_str());
       return url;  // let the request fail with its own error
     }
-    if (ip != lastIp) Serial.printf("[apex] %s is %s\n", name.c_str(), ip.toString().c_str());
-    lastName = name;
-    lastIp = ip;
-    lastAt = millis();
+    Serial.printf("[apex] %s is %s\n", name.c_str(), ip.toString().c_str());
+    known.magic = kKnownMagic;
+    strlcpy(known.name, name.c_str(), sizeof known.name);
+    known.ip = (uint32_t)ip;
   }
-  return url.substring(0, a) + lastIp.toString() + url.substring(b);
+  return url.substring(0, a) + IPAddress(known.ip).toString() + url.substring(b);
 }
 
 // Returns "" on success, else an error. publish = write to readings.
@@ -95,6 +104,7 @@ static String poll(const String &hostIn, const String &user, const String &pass,
   }
   if (code != 200) {
     http.end();
+    if (code < 0) known.ip = 0;  // ask mDNS again next time
     return code < 0 ? String("can't reach Apex (") + http.errorToString(code) + ")" : "HTTP " + String(code);
   }
 
@@ -167,6 +177,7 @@ static void pollJob(String host, String user, String pass) {
                 good ? (String(n) + " inputs").c_str() : err.c_str(),
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  fails = good ? 0 : (fails < 10 ? fails + 1 : fails);
   if (good) {
     inputs = n;
     lastOk = millis();
@@ -192,7 +203,13 @@ void loop() {
     return;
   }
   shown = -1;
+  // Not before the panel has an address: a poll then fails with "no Wi-Fi" and
+  // the next one waited the whole poll_s (Apex took a minute to show after a
+  // wake, 2026-11-07).
+  if (!net::online()) return;
   uint32_t every = (uint32_t)s.apexPoll_s * 1000UL;
+  // After a failure try again soon: 5, 10, 20, 40 s ... up to poll_s.
+  if (fails) every = min<uint32_t>(every, 5000UL << min<int>(fails - 1, 4));
   if (!force && millis() - lastPoll < every && lastPoll) return;
   if (worker::pending("apex")) return;
   force = false;
