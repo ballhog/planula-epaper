@@ -20,7 +20,7 @@ struct Lock {
 };
 
 static uint32_t nDropped = 0;
-static volatile uint32_t nNew = 0;
+static volatile uint32_t nNew = 0, nVersion = 0;
 
 // float <-> IEEE 754 half (round to nearest, no NaN/denormal subtleties needed)
 static uint16_t toHalf(float f) {
@@ -49,6 +49,7 @@ static float fromHalf(uint16_t h) {
 float sparkAt(const Reading &r, int i) { return fromHalf(r.spark[i]); }
 uint32_t dropped() { return nDropped; }
 uint32_t newKeys() { return nNew; }
+uint32_t version() { return nVersion; }
 
 static void pushSpark(Reading &r, float v) {
   if (r.nspark < panel::kSparkLen) r.spark[r.nspark++] = toHalf(v);
@@ -81,6 +82,7 @@ void update(const String &key, const char *source, const String &device, const S
   PANEL_COPY(r->kind, kind.c_str());
   PANEL_COPY(r->unit, unit.c_str());
   r->value = value;
+  nVersion = nVersion + 1;
   r->atMs = millis();
   if (isnan(value)) return;
   // The trend's newest point follows the live value; a new slot starts every 30 min.

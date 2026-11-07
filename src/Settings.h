@@ -100,5 +100,7 @@ void toJson(JsonObject o, bool withSecrets);
 // value; {"clear": true} clears them (the settings password goes back to the
 // setup Wi-Fi password instead). Returns "" or an error.
 String applyJson(JsonObjectConst o);
+// Counts up on every settings change (applyJson).
+uint32_t generation();
 
 }  // namespace settings

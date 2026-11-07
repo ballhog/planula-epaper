@@ -133,7 +133,11 @@ static bool validName(const String &n) {
   return true;
 }
 
+static uint32_t gen = 0;
+uint32_t generation() { return gen; }
+
 String applyJson(JsonObjectConst o) {
+  gen++;
   if (o["name"].is<const char *>()) {
     String n = o["name"].as<const char *>();
     n.toLowerCase();

@@ -138,6 +138,18 @@ bool fetchPage(int i, panel::Page &p) {
 }
 
 void collectAlarms() {
+  // Building every page is only worth it when something they're built from
+  // changed: readings, a Coeno page, settings, the page count.
+  static uint32_t seenR = 0, seenC = 0, seenS = 0;
+  static int seenN = -1;
+  static uint32_t seenAt = 0;  // and at least once a minute: values go stale with time
+  uint32_t r = readings::version(), cp = coeno::lastPageMs(), sg = settings::generation();
+  if (r == seenR && cp == seenC && sg == seenS && nPages == seenN && millis() - seenAt < 60000) return;
+  seenAt = millis();
+  seenR = r;
+  seenC = cp;
+  seenS = sg;
+  seenN = nPages;
   std::vector<Alarm> now;
   std::unique_ptr<panel::Page> pp(new (std::nothrow) panel::Page());  // ~4.4 kB: not on the loop stack
   if (!pp) return;

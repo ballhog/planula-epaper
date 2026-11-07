@@ -41,6 +41,8 @@ float sparkAt(const Reading &r, int i);
 // changes, so a gauge waiting on "—" fills in at once instead of at the next
 // minute (Hydros data arrived ~20 s after boot but showed up to a minute later).
 uint32_t newKeys();
+// Counts up on every value written (to tell whether anything changed).
+uint32_t version();
 // Readings the table had no room for since boot.
 uint32_t dropped();
 
