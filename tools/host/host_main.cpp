@@ -501,6 +501,7 @@ static void testRules() {
 
   // redraw steps
   CHECK(fabsf(redrawStep(gauge("1R pH", "", 8.1f, 2)) - 0.02f) < 1e-6f);
+  CHECK(fabsf(redrawStep(gauge("Sump PH", "", 8.1f, 2)) - 0.02f) < 1e-6f);
   CHECK(fabsf(redrawStep(gauge("Temp", "°F", 77.8f, 1)) - 0.2f) < 1e-6f);
   CHECK(fabsf(redrawStep(gauge("Temp", "°C", 25.9f, 1)) - 0.1f) < 1e-6f);
   CHECK(fabsf(redrawStep(gauge("Salinity", "ppt", 33.0f, 1)) - 0.1f) < 1e-6f);
@@ -512,7 +513,7 @@ static void testRules() {
   p.n = 2;
   p.g[0] = gauge("1R pH", "", 8.10f, 2);
   p.g[1] = gauge("Salinity", "ppt", 33.0f, 1);
-  Drawn d;
+  Drawn d = {};
   remember(p, 0, d);
   bool moved, st;
   p.g[0].value = 8.11f;

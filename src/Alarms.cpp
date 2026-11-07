@@ -12,14 +12,14 @@ void collectAlarms() {
   static uint32_t seenAt = 0;  // and at least once a minute: values go stale with time
   uint32_t r = readings::version(), cp = coeno::lastPageMs(), sg = settings::generation();
   if (r == seenR && cp == seenC && sg == seenS && nPages == seenN && millis() - seenAt < 60000) return;
+  std::vector<Alarm> now;
+  std::unique_ptr<panel::Page> pp(new (std::nothrow) panel::Page());  // ~4.4 kB: not on the loop stack
+  if (!pp) return;  // try again next draw (nothing cached yet)
   seenAt = millis();
   seenR = r;
   seenC = cp;
   seenS = sg;
   seenN = nPages;
-  std::vector<Alarm> now;
-  std::unique_ptr<panel::Page> pp(new (std::nothrow) panel::Page());  // ~4.4 kB: not on the loop stack
-  if (!pp) return;
   panel::Page &p = *pp;
   for (int i = 0; i < nPages; i++) {
     if (!fetchPage(i, p)) continue;

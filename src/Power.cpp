@@ -10,6 +10,8 @@
 #include <math.h>
 #include <time.h>
 
+#include <type_traits>
+
 #include "Apex.h"
 #include "Board.h"
 #include "App.h"
@@ -46,6 +48,9 @@ struct Rtc {
   readings::Reading r[kKeep];  // times stored as ages (ms) at savedAt
 };
 RTC_DATA_ATTR Rtc rtc;
+// No constructor may touch it: one would run on every wake and wipe what the
+// sleep was meant to keep.
+static_assert(std::is_trivially_default_constructible<Rtc>::value, "Rtc must be plain data (RTC memory)");
 
 bool quietCycle = false;  // timer wake: decide, maybe draw, sleep
 uint32_t awakeUntil = 0, cycleStart = 0;

@@ -7,6 +7,8 @@
 #include <esp_sleep.h>
 #include <time.h>
 
+#include <type_traits>
+
 #include "Settings.h"
 
 #ifndef FW_BUILD
@@ -34,6 +36,7 @@ struct FastJoin {
 };
 constexpr uint32_t kFastMagic = 0x46534A31;  // "FSJ1"
 RTC_DATA_ATTR FastJoin fast;
+static_assert(std::is_trivially_default_constructible<FastJoin>::value, "FastJoin must be plain data (RTC memory)");
 bool fastTry = false;
 uint32_t fastAt = 0;
 

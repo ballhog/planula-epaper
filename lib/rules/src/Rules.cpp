@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 
 namespace rules {
@@ -14,7 +15,12 @@ float redrawStep(const panel::Gauge &g) {
   if (!strcmp(u, "mV")) return 5.0f;
   if (!strcmp(u, "%")) return 2.0f;
   if (!strcmp(u, "ppm")) return fmaxf(1.0f, fabsf(g.value) * 0.01f);
-  if (!strcmp(u, "pH") || strstr(g.label, "pH") || strstr(g.label, "ph ") == g.label) return 0.02f;
+  // pH gauges usually have no unit: go by the label, any case ("1R pH", "Sump PH").
+  char low[sizeof g.label];
+  size_t i = 0;
+  for (; g.label[i] && i + 1 < sizeof low; i++) low[i] = (char)tolower((unsigned char)g.label[i]);
+  low[i] = 0;
+  if (!strcmp(u, "pH") || strstr(low, "ph")) return 0.02f;
   float d = powf(10.0f, -(float)g.dec);
   return fmaxf(2.0f * d, fabsf(g.value) * 0.01f);
 }

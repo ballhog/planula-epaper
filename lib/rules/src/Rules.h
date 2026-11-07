@@ -21,9 +21,12 @@ inline int32_t since(uint32_t now, uint32_t then) { return (int32_t)(now - then)
 // How much a value must move before a battery-mode redraw.
 float redrawStep(const panel::Gauge &g);
 
-// What the screen showed, kept through deep sleep.
+// What the screen showed, kept through deep sleep. Plain data, no default
+// member values: it lives in RTC_DATA_ATTR memory, and a constructor would run
+// on every wake and wipe it (seen in review of build 56: every battery wake
+// then counted as "moved" and redrew).
 struct Drawn {
-  uint8_t n = 0, page = 0xFF;
+  uint8_t n, page;
   float vals[panel::kMaxGauges];
   uint8_t stat[panel::kMaxGauges];
 };
