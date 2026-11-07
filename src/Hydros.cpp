@@ -308,6 +308,7 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
   filter["Input"]["*"]["i10Value"] = true;
   JsonDocument doc;
   DeserializationError err;
+  long inflLen = -1;
   if (n > 2 && p[0] == 0x78) {
     // Inflate as a stream through a fixed 32 kB window (allocated once), so the
     // size of the JSON inside doesn't matter. See InflateReader.
@@ -322,9 +323,31 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
                     st == TINFL_STATUS_HAS_MORE_OUTPUT ? ", inflates to more than 16 kB" : "");
       return;
     }
+    inflLen = m;
     err = deserializeJson(doc, (const char *)inflater.out, (size_t)m, DeserializationOption::Filter(filter));
   } else {
     err = deserializeJson(doc, (const char *)p, n, DeserializationOption::Filter(filter));
+  }
+  // Once per boot: what the status says about outputs, so their format can be
+  // read off the log (the panel only uses the inputs so far).
+  static bool shownOutputs = false;
+  if (!shownOutputs && inflLen > 0) {
+    shownOutputs = true;
+    const char *js = (const char *)inflater.out;
+    int jl = (int)inflLen;
+    Serial.printf("[hydros] status layout (%d bytes) starts: %.*s\n", jl, jl < 200 ? jl : 200, js);
+    const char *o = nullptr;
+    for (const char *needle : {"\"Output", "\"output", "\"Relay", "\"Outlet"}) {
+      for (int i = 0; !o && i + (int)strlen(needle) <= jl; i++)
+        if (!memcmp(js + i, needle, strlen(needle))) o = js + i;
+      if (o) break;
+    }
+    if (o) {
+      int left = jl - (int)(o - js);
+      Serial.printf("[hydros] outputs section: %.*s\n", left < 700 ? left : 700, o);
+    } else {
+      Serial.println("[hydros] no Output section found in the status");
+    }
   }
   if (err) {
     Serial.printf("[hydros] %s: %u bytes, JSON %s (free %u)\n", topic.c_str(), (unsigned)len, err.c_str(),

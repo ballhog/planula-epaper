@@ -9,6 +9,7 @@
 #include <Adafruit_GFX.h>
 
 #include <functional>
+#include <vector>
 
 #include "BandCanvas.h"
 #include "Model.h"
@@ -135,6 +136,40 @@ static void samples() {
   PANEL_COPY(c.alarm, "SALINITY LOW 31.2 ppt");
   c.alarmCount = 1;
   shot(cv, "2-chem-3x2-alarm", [&](Adafruit_GFX &d) { render(d, q, c); });
+  {
+    // Direct-mode Outlets page: past only (12 h up to now), "since" times.
+    Page o;
+    PANEL_COPY(o.title, "Outlets");
+    o.layout = Layout::Timeline;
+    o.from = -720;
+    o.to = 0;
+    o.clock = 22 * 60 + 25;
+    struct L { const char *name; std::vector<std::pair<int, int>> ev; const char *note; };
+    std::vector<L> ls = {
+        {"Return", {{-720, 1}, {-200, 0}, {-190, 1}}, ""},
+        {"Skimmer", {{-720, 1}, {-200, 0}, {-150, 1}}, ""},
+        {"Heater", {{-720, 0}, {-600, 1}, {-560, 0}, {-430, 1}, {-400, 0}, {-250, 1}, {-215, 0}, {-60, 1}}, ""},
+        {"Kalk stirrer", {{-720, 0}, {-95, 1}}, "by hand"},
+        {"Lights", {{-720, 0}, {-660, 1}, {-120, 0}}, ""},
+    };
+    for (auto &l : ls) {
+      Gauge &g = o.g[o.n++];
+      PANEL_COPY(g.label, l.name);
+      PANEL_COPY(g.note, l.note);
+      g.lane = Lane::OnOff;
+      g.status = Status::Ok;
+      g.has = true;
+      for (auto &e : l.ev) {
+        g.t[g.nspark] = e.first;
+        g.spark[g.nspark++] = e.second;
+      }
+      g.value = g.spark[g.nspark - 1];
+    }
+    Chrome oc = c;
+    oc.page = 2;
+    oc.pages = 3;
+    shot(cv, "20-outlets", [&](Adafruit_GFX &d) { render(d, o, oc); });
+  }
   {
     // Alarm takeover: the chemistry page with its alarm, and with two.
     shot(cv, "18-takeover-one", [&](Adafruit_GFX &d) { render(d, q, c); });

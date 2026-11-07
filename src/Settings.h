@@ -30,6 +30,12 @@ struct GaugeCfg {
   float alarmLo = NAN, alarmHi = NAN;  // alarm beyond these
 };
 
+// An output picked for the Outlets page (direct mode).
+struct OutletCfg {
+  String key;    // "apex:Return"
+  String label;  // "" = its own name
+};
+
 struct Settings {
   String name = "planula-epaper-1";  // hostname + MQTT id
   String mode = "direct";            // coeno | direct (new panels: no Coeno address yet)
@@ -57,7 +63,8 @@ struct Settings {
   uint16_t saverMin = 10;
   String dailyAt = "07:00";
   bool hourlyCheck = true;
-  bool buzzer = true;  // reTerminal: beep on a new alarm and every 5 min until acknowledged
+  bool buzzer = true;
+  std::vector<OutletCfg> outlets;  // Outlets page lanes, in order (max 8)  // reTerminal: beep on a new alarm and every 5 min until acknowledged
   String view = "both";  // both | numbers | graphs (tile view; a button cycles it on the reTerminal)
   bool tempF = false;        // direct mode: show temperatures in °F
   uint16_t rotate_s = 0;     // 0 = pages only change with the button

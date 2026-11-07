@@ -117,7 +117,13 @@ th{font-size:12px;color:var(--muted);font-weight:500}
   <div id="gauges"></div>
   <div class="btns"><button class="btn" onclick="addGauge()">Add gauge</button><button class="btn" onclick="loadReadings()">Reload readings</button></div>
  </div>
- <div class="btns"><button class="btn pri" onclick="saveGauges()">Save pages and gauges</button></div>
+ <div class="card"><h2>Outlets page</h2>
+  <p class="hint">Tick the outlets to show on their own page, as on/off bars for the last 12 h up to now (filled = on). The controllers don't share their programs, so there's no "next on" here; the panel learns the history while it runs, starting empty after a restart. Up to 8, in the order you tick them.</p>
+  <label><input type="checkbox" id="olHidden" onchange="drawOutlets()"> Also list virtual and alert outputs</label>
+  <div id="outlets"></div>
+  <div class="btns"><button class="btn" onclick="loadOutlets()">Reload outlets</button></div>
+ </div>
+ <div class="btns"><button class="btn pri" onclick="saveGauges()">Save pages, gauges and outlets</button></div>
 </section>
 
 <section id="t-display">
@@ -256,7 +262,19 @@ function testHydros(){runTest('hydros',{user:$('hydrosUser').value.trim(),pass:$
 
 // ── pages + gauges
 let P=[],G=[];
-function renderPages(){P=(C.pages||[]).map(p=>({...p}));G=(C.gauges||[]).map(g=>({...g}));drawPages();drawGauges()}
+function renderPages(){P=(C.pages||[]).map(p=>({...p}));G=(C.gauges||[]).map(g=>({...g}));OL=(C.outlets||[]).map(o=>({...o}));drawPages();drawGauges();loadOutlets()}
+let OL=[],OA=[];
+async function loadOutlets(){try{OA=await get('/api/outlets')}catch(e){OA=[]}drawOutlets()}
+function drawOutlets(){const all=$('olHidden').checked;const picked=k=>OL.findIndex(o=>o.key===k);
+ const list=OA.filter(o=>all||!o.hidden||picked(o.key)>=0);
+ for(const o of OL)if(!list.find(x=>x.key===o.key))list.push({key:o.key,name:o.key.split(':').slice(1).join(':'),source:'',state:'not seen yet'});
+ $('outlets').innerHTML=list.length?list.map(o=>{const i=picked(o.key);const lab=i>=0?(OL[i].label||''):'';
+  return `<div class="row" style="align-items:center"><label style="flex:2"><input type="checkbox" ${i>=0?'checked':''} onchange="pickOutlet('${esc(o.key)}',this.checked)"> ${esc(o.name)} <span class="hint">${esc(o.source||'')} ${esc(o.type||'')} · ${esc(o.state||'')}${i>=0?' · lane '+(i+1):''}</span></label>
+  <input style="flex:1" placeholder="label" value="${esc(lab)}" ${i>=0?'':'disabled'} oninput="labelOutlet('${esc(o.key)}',this.value)"></div>`}).join('')
+  :'<p class="hint">No outlets yet: they show up after the first Apex read (Hydros outlets come in a later build).</p>'}
+function pickOutlet(k,on){const i=OL.findIndex(o=>o.key===k);if(on&&i<0){if(OL.length>=8){alert('Up to 8 outlets');drawOutlets();return}OL.push({key:k,label:''})}
+ if(!on&&i>=0)OL.splice(i,1);drawOutlets()}
+function labelOutlet(k,v){const o=OL.find(o=>o.key===k);if(o)o.label=v}
 function drawPages(){$('pages').innerHTML=P.map((p,i)=>`<div class="row" style="align-items:end"><div><label>Page ${i+1} title</label><input value="${esc(p.title)}" oninput="P[${i}].title=this.value"></div>
  <div><label>Layout</label><select onchange="P[${i}].layout=this.value">${['auto','single','2x2','3x2','list'].map(l=>`<option ${p.layout===l?'selected':''}>${l}</option>`).join('')}</select></div>
  <div>${P.length>1?`<button class="btn mini bad" onclick="P.splice(${i},1);G.forEach(g=>{if(g.page>${i})g.page--;else if(g.page==${i})g.page=0});drawPages();drawGauges()">Remove</button>`:''}</div></div>`).join('')}
@@ -285,7 +303,7 @@ function addGauge(){if(G.length>=40)return toast('40 gauges at most');G.push({ke
 async function loadReadings(){try{R=await get('/api/readings');R.sort((a,b)=>(a.source+a.device+a.name).localeCompare(b.source+b.device+b.name));drawGauges()}catch(e){}}
 function num(v){if(v===''||v==null)return null;const n=parseFloat(v);return Number.isNaN(n)?null:n}
 function saveGauges(){const gauges=G.filter(g=>g.key).map(g=>({key:g.key,label:g.label,unit:g.unit,dec:g.dec,page:g.page,
- warn_lo:num(g.warn_lo),warn_hi:num(g.warn_hi),alarm_lo:num(g.alarm_lo),alarm_hi:num(g.alarm_hi)}));save({pages:P,gauges})}
+ warn_lo:num(g.warn_lo),warn_hi:num(g.warn_hi),alarm_lo:num(g.alarm_lo),alarm_hi:num(g.alarm_hi)}));save({pages:P,gauges,outlets:OL})}
 
 // ── display + system
 function pwShow(){const m=$('pwMode').value;$('pwEveryBox').style.display=m==='saver'?'':'none';

@@ -540,7 +540,18 @@ void laneState(const Page &p, const Gauge &g, char *out, size_t n) {
           return;
         }
       }
-      copyStr(out, n, on ? "ON" : "OFF");
+      // Nothing scheduled ahead (direct mode: the panel only saw the past):
+      // say since when instead. "by hand" from g.note.
+      for (int i = g.nspark - 1; i > 0; i--) {
+        if (g.t[i] <= 0 && g.t[i] > p.from && (g.spark[i] > 0.5f) == on && (g.spark[i - 1] > 0.5f) != on) {
+          clockLabel(p, g.t[i], false, tm, sizeof tm);
+          // "ON since 7:15 PM"; forced by hand just "ON by hand" (both don't fit)
+          if (g.note[0]) snprintf(out, n, "%s %s", on ? "ON" : "OFF", g.note);
+          else snprintf(out, n, "%s since %s", on ? "ON" : "OFF", tm);
+          return;
+        }
+      }
+      snprintf(out, n, "%s%s%s", on ? "ON" : "OFF", g.note[0] ? " " : "", g.note);
       break;
     }
     case Lane::Events: {

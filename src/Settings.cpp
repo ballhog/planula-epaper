@@ -95,6 +95,12 @@ void toJson(JsonObject o, bool with) {
     j["title"] = pg.title;
     j["layout"] = pg.layout;
   }
+  JsonArray ol = o["outlets"].to<JsonArray>();
+  for (auto &x : s.outlets) {
+    JsonObject j = ol.add<JsonObject>();
+    j["key"] = x.key;
+    j["label"] = x.label;
+  }
   JsonArray g = o["gauges"].to<JsonArray>();
   for (auto &gc : s.gauges) {
     JsonObject j = g.add<JsonObject>();
@@ -215,6 +221,18 @@ String applyJson(JsonObjectConst o) {
       if (np.size() >= 6) break;
     }
     s.pages = np;
+  }
+  if (o["outlets"].is<JsonArrayConst>()) {
+    std::vector<OutletCfg> no;
+    for (JsonObjectConst j : o["outlets"].as<JsonArrayConst>()) {
+      OutletCfg x;
+      x.key = j["key"] | "";
+      if (!x.key.length()) continue;
+      x.label = j["label"] | "";
+      no.push_back(x);
+      if (no.size() >= 8) break;
+    }
+    s.outlets = no;
   }
   if (o["gauges"].is<JsonArrayConst>()) {
     std::vector<GaugeCfg> ng;

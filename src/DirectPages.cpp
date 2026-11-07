@@ -1,15 +1,23 @@
 #include "DirectPages.h"
 
 #include "PageJson.h"
+#include "Outlets.h"
 #include "Readings.h"
 #include "Settings.h"
 
 namespace direct {
 
-int pageCount() {
+// Gauge pages, then the Outlets page when any outlets are picked.
+static int gaugePages() {
   const Settings &s = settings::get();
   int n = (int)s.pages.size();
   for (auto &g : s.gauges) n = max(n, g.page + 1);
+  return min(n, panel::kMaxPages - 1);
+}
+
+int pageCount() {
+  int n = gaugePages();
+  if (!settings::get().outlets.empty()) n++;
   return constrain(n, 1, panel::kMaxPages);
 }
 
@@ -17,6 +25,10 @@ static float cToF(float c) { return c * 9.0f / 5.0f + 32.0f; }
 
 void build(int i, panel::Page &p) {
   const Settings &s = settings::get();
+  if (!s.outlets.empty() && i == gaugePages()) {
+    outlets::buildPage(p);
+    return;
+  }
   p.clear();
   if (i < (int)s.pages.size()) {
     PANEL_COPY(p.title, s.pages[i].title.c_str());

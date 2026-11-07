@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 
+#include "Outlets.h"
 #include "Readings.h"
 #include "Worker.h"
 #include "Settings.h"
@@ -104,6 +105,12 @@ static String poll(const String &hostIn, const String &user, const String &pass,
   in["value"] = true;
   filter["istat"]["inputs"][0] = in;
   filter["status"]["inputs"][0] = in;
+  JsonObject out = filter["outputs"][0].to<JsonObject>();
+  out["name"] = true;
+  out["type"] = true;
+  out["status"] = true;
+  filter["istat"]["outputs"][0] = out;
+  filter["status"]["outputs"][0] = out;
   filter["system"]["hostname"] = true;
   filter["hostname"] = true;
 
@@ -131,6 +138,24 @@ static String poll(const String &hostIn, const String &user, const String &pass,
     if (publish) readings::update("apex:" + name, "Apex", dev, name, kind, readings::unitFor(kind), v);
   }
   if (count) *count = n;
+
+  // Outputs: status[0] is ON / OFF (forced by hand), AON / AOF (auto), or a
+  // profile name state like TBL for variable outputs.
+  JsonArrayConst outs = doc["outputs"].as<JsonArrayConst>();
+  if (outs.isNull()) outs = doc["istat"]["outputs"].as<JsonArrayConst>();
+  if (outs.isNull()) outs = doc["status"]["outputs"].as<JsonArrayConst>();
+  if (publish && !outs.isNull()) {
+    for (JsonObjectConst o : outs) {
+      String name = o["name"] | "";
+      if (!name.length()) continue;
+      String type = o["type"] | "";
+      String st = o["status"][0] | "";
+      bool manual = st == "ON" || st == "OFF";
+      bool on = st == "ON" || st == "AON" || st == "TBL";
+      bool hidden = type == "virtual" || type == "alert" || type == "serial";
+      outlets::update(("apex:" + name).c_str(), "Apex", type.c_str(), on, manual, hidden);
+    }
+  }
   return "";
 }
 

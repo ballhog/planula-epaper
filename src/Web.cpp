@@ -5,6 +5,7 @@
 #include "Worker.h"
 #include "Board.h"
 #include "Power.h"
+#include "Outlets.h"
 
 #include <ArduinoJson.h>
 #include <WebServer.h>
@@ -275,6 +276,23 @@ void handleReadings() {
   sendJson(200, d);
 }
 
+void handleOutlets() {
+  if (!allowed()) return;
+  JsonDocument d;
+  JsonArray a = d.to<JsonArray>();
+  outlets::Out o;
+  for (int i = 0; outlets::at(i, o); i++) {
+    JsonObject j = a.add<JsonObject>();
+    j["key"] = o.key;
+    j["name"] = outlets::nameOf(o.key);
+    j["source"] = o.source;
+    j["type"] = o.type;
+    j["hidden"] = o.hidden;
+    j["state"] = String(o.on ? "on" : "off") + (o.manual ? " (by hand)" : " (auto)");
+  }
+  sendJson(200, d);
+}
+
 // Day-to-day controls (next page, refresh) stay open on the LAN, like the button.
 void handlePage() {
   JsonDocument in;
@@ -392,6 +410,7 @@ void begin() {
   server.on("/api/wifi/scan", HTTP_GET, handleScan);
   server.on("/api/test/apex", HTTP_POST, handleTestApex);
   server.on("/api/test/hydros", HTTP_POST, handleTestHydros);
+  server.on("/api/outlets", HTTP_GET, handleOutlets);
   server.on("/api/test/apex", HTTP_GET, [] { testResult(apexTest); });
   server.on("/api/test/hydros", HTTP_GET, [] { testResult(hydrosTest); });
   server.on("/api/readings", HTTP_GET, handleReadings);
