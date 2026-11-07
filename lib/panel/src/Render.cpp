@@ -18,6 +18,9 @@ constexpr int kHeaderH = 50;   // header / alarm banner
 constexpr int kFooterH = 32;
 constexpr int kBodyX = 8, kBodyY = kHeaderH + 8;
 constexpr int kBodyW = kW - 16, kBodyH = kH - kHeaderH - kFooterH - 16;
+// Gauge pages have no header (2026-11-06): the title and page dots sit in the
+// footer, and the tiles get the whole height above it.
+constexpr int kPageY = 8, kPageH = kH - kFooterH - 16;
 constexpr int kGap = 8;
 
 // ── small drawing helpers ────────────────────────────────────────────────
@@ -76,6 +79,21 @@ const GFXfont *valueFontFor(int w, int h, const char *val, int unitW) {
 }
 
 // Sparkline with the normal band drawn as dashed lines. Area is x,y,w,h.
+// The smallest change a trend should make look big. Without it a graph scales
+// 43.8-44.2 % humidity to full height and noise looks like a swing.
+static float minSpan(const Gauge &g, float mid) {
+  const char *u = g.unit;
+  if (!strcmp(u, "°F")) return 1.0f;
+  if (!strcmp(u, "°C")) return 0.5f;
+  if (!strcmp(u, "%")) return 5.0f;
+  if (!strcmp(u, "ppt") || !strcmp(u, "PSU")) return 0.5f;
+  if (!strcmp(u, "mV")) return 20.0f;
+  if (!strcmp(u, "dKH")) return 0.3f;
+  if (!strcmp(u, "ppm")) return fmaxf(10.0f, fabsf(mid) * 0.03f);
+  if (!strcmp(u, "pH") || strstr(g.label, "pH")) return 0.1f;
+  return fmaxf(4.0f * powf(10.0f, -(float)g.dec), fabsf(mid) * 0.02f);
+}
+
 void sparkline(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, uint16_t fg, bool labels) {
   if (g.nspark < 2 || w < 40 || h < 18) return;
   float mn = g.spark[0], mx = g.spark[0];
@@ -93,8 +111,13 @@ void sparkline(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, uint
       if (g.lo < mn) mn = g.lo;
       if (g.hi > mx) mx = g.hi;
     }
-    float span = mx - mn;
-    if (span < 1e-6f) span = fabsf(mx) * 0.02f + 0.1f;
+    float span = mx - mn, want = minSpan(g, (mn + mx) / 2);
+    if (span < want) {  // widen around the middle
+      float mid = (mn + mx) / 2;
+      mn = mid - want / 2;
+      mx = mid + want / 2;
+      span = want;
+    }
     mn -= span * 0.08f;
     mx += span * 0.08f;
   }
@@ -196,14 +219,22 @@ const GFXfont *tileValueFont(const Gauge &g, int w, int h, View view) {
 }
 
 // 24 h low / high of the trend, formatted like the value.
+// The trend points are 30-min means, so the value on the tile can sit outside
+// them: include it (pH 7.97 under "low 7.98" otherwise). Values of 100 and up
+// lose their decimals here ("397 – 399", not "397.0 – 399.0" cut off).
 static void sparkMinMax(const Gauge &g, char *lo, char *hi, size_t n) {
   float mn = g.spark[0], mx = g.spark[0];
   for (int i = 1; i < g.nspark; i++) {
     if (g.spark[i] < mn) mn = g.spark[i];
     if (g.spark[i] > mx) mx = g.spark[i];
   }
+  if (g.has && !isnan(g.value)) {
+    if (g.value < mn) mn = g.value;
+    if (g.value > mx) mx = g.value;
+  }
   Gauge t = g;
   t.has = true;
+  if (fabsf(mx) >= 100.0f) t.dec = 0;
   t.value = mn;
   formatValue(t, lo, n);
   t.value = mx;
@@ -263,9 +294,8 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
       if (caption) {
         char lo[16], hi[16], line[48];
         sparkMinMax(g, lo, hi, sizeof lo);
-        snprintf(line, sizeof line, "low %s · high %s", lo, hi);
-        drawTextFit(d, font::Small, x + pad, y + h - pad + 2, line, fg, w - 2 * pad - 70);
-        drawText(d, font::Small, x + w - pad, y + h - pad + 2, "24 h", fg, Right);
+        snprintf(line, sizeof line, "24 h  %s – %s", lo, hi);
+        drawTextFit(d, font::Small, x + pad, y + h - pad + 2, line, fg, w - 2 * pad);
       }
     } else {
       // Direct mode keeps one point per 30 min, so a trend needs about an hour.
@@ -306,16 +336,19 @@ void listRow(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, View v
   uint16_t fg = alarm ? PAPER : INK, bg = alarm ? INK : PAPER;
   if (alarm) d.fillRoundRect(x, y + 1, w, h - 2, 6, INK);
   int base = y + h / 2 + 8;
-  drawTextFit(d, font::Body, x + 12, base, g.label, fg, 250);
-  if (g.nspark >= 2 && view != View::Numbers) {
-    Gauge s = g;
-    s.hasRange = g.hasRange;
-    sparkline(d, s, x + 280, y + 6, 230, h - 12, fg, false);
-  }
   char val[16];
   formatValue(g, val, sizeof val);
   const GFXfont *vf = h >= 44 ? font::NumS : font::Body;
   int vx = x + w - 110;
+  // Narrow rows (the takeover's right side): the label gets what the value leaves.
+  int labelMax = vx - textWidth(vf, val) - (x + 12) - 14;
+  if (labelMax > 250) labelMax = 250;
+  drawTextFit(d, font::Body, x + 12, base, g.label, fg, labelMax);
+  if (g.nspark >= 2 && view != View::Numbers && w >= 560) {
+    Gauge s = g;
+    s.hasRange = g.hasRange;
+    sparkline(d, s, x + 280, y + 6, 230, h - 12, fg, false);
+  }
   drawText(d, vf, vx, base + (h >= 44 ? 4 : 0), val, fg, Right);
   drawTextFit(d, font::Small, vx + 6, base, g.unit, fg, 50);
   char note[24];
@@ -378,6 +411,72 @@ void footer(Adafruit_GFX &d, const Chrome &c) {
   int rw = c.footerRight[0] ? textWidth(font::Small, c.footerRight) : 0;
   drawTextFit(d, font::Small, 14, y + 22, c.footerLeft, fg, kW - rw - 50);
   if (rw) drawText(d, font::Small, kW - 14, y + 22, c.footerRight, fg, Right);
+}
+
+// Gauge pages: title and page dots on the left of the footer, then the
+// status; Wi-Fi / battery on the right. An unacknowledged alarm turns the
+// footer black with the alarm text (the takeover tile shows the reading).
+void pageFooter(Adafruit_GFX &d, const Page &p, const Chrome &c) {
+  int y = kH - kFooterH;
+  bool alarm = c.alarm[0] && !c.alarmAcked;
+  bool inv = alarm || c.footerAlert;
+  uint16_t fg = inv ? PAPER : INK;
+  if (inv) d.fillRect(0, y, kW, kFooterH, INK);
+  else d.fillRect(0, y, kW, 2, INK);
+  int base = y + 23;
+  int x = 14;
+  x += drawText(d, font::Body, x, base + 1, p.title[0] ? p.title : "Reef", fg) + 10;
+  if (c.pages > 1) {
+    for (int i = 0; i < c.pages; i++) {
+      int cx = x + 5;
+      if (i == c.page) d.fillCircle(cx, y + 16, 5, fg);
+      else d.drawCircle(cx, y + 16, 5, fg);
+      x += 16;
+    }
+    x += 6;
+  }
+  char left[96];
+  if (c.alarm[0]) {
+    if (c.alarmCount > 1)
+      snprintf(left, sizeof left, "▲ %s +%u more%s", c.alarm, (unsigned)(c.alarmCount - 1), c.alarmAcked ? " · acknowledged" : "");
+    else snprintf(left, sizeof left, "▲ %s%s", c.alarm, c.alarmAcked ? " · acknowledged" : "");
+  } else {
+    snprintf(left, sizeof left, "%s", c.footerLeft);
+  }
+  int rw = c.footerRight[0] ? textWidth(font::Small, c.footerRight) : 0;
+  drawText(d, font::Small, x, base, "·", fg);
+  drawTextFit(d, font::Small, x + 14, base, left, fg, kW - x - 14 - rw - 40);
+  if (rw) drawText(d, font::Small, kW - 14, base, c.footerRight, fg, Right);
+}
+
+// Alarm takeover: one or two gauges in alarm get the left half of the page,
+// big and with their trend; everything else is a compact list on the right.
+// Returns false (draw the normal grid) when there's no alarm, more than two,
+// or nothing else to show.
+bool takeover(Adafruit_GFX &d, const Page &p) {
+  int na = 0, ia[2] = {-1, -1};
+  for (int i = 0; i < p.n; i++)
+    if (p.g[i].status == Status::Alarm) {
+      if (na < 2) ia[na] = i;
+      na++;
+    }
+  if (na == 0 || na > 2 || p.n < 2) return false;
+  int lw = kBodyW * 52 / 100;
+  int th = na == 1 ? kPageH : (kPageH - kGap) / 2;
+  for (int k = 0; k < na; k++)
+    tile(d, p.g[ia[k]], kBodyX, kPageY + k * (th + kGap), lw, th, nullptr, View::Graphs);
+  int rx = kBodyX + lw + kGap, rw = kBodyW - lw - kGap;
+  int rest = p.n - na;
+  int rh = kPageH / rest;
+  if (rh > 74) rh = 74;
+  int y0 = kPageY + (kPageH - rh * rest) / 2;
+  int r = 0;
+  for (int i = 0; i < p.n; i++) {
+    if (i == ia[0] || i == ia[1]) continue;
+    listRow(d, p.g[i], rx, y0 + r * rh, rw, rh, View::Numbers);
+    r++;
+  }
+  return true;
 }
 
 // ── timeline page: one lane per gauge, time across ───────────────────────
@@ -469,9 +568,9 @@ void timeline(Adafruit_GFX &d, const Page &p) {
   auto T = [&](int x) { return p.from + (x - x0) * (float)span / pw; };
 
   int n = p.n;
-  int laneH = (kBodyH - axisH) / n;
+  int laneH = (kPageH - axisH) / n;
   if (laneH > 86) laneH = 86;
-  int top = kBodyY + 2 + (kBodyH - axisH - laneH * n) / 2;
+  int top = kPageY + 2 + (kPageH - axisH - laneH * n) / 2;
   int bot = top + laneH * n;  // axis line
 
   // Grid: dotted verticals at each tick.
@@ -640,8 +739,7 @@ void gridFor(const Page &p, int &cols, int &rows) {
 
 void render(Adafruit_GFX &d, const Page &p, const Chrome &c) {
   d.fillScreen(PAPER);
-  header(d, p, c);
-  footer(d, c);
+  pageFooter(d, p, c);
 
   if (p.n == 0) {
     drawText(d, font::Head, kW / 2, kH / 2 - 10, "No gauges on this page", INK, Center);
@@ -653,18 +751,19 @@ void render(Adafruit_GFX &d, const Page &p, const Chrome &c) {
     timeline(d, p);
     return;
   }
+  if ((p.layout == Layout::Auto || p.layout == Layout::Grid2x2 || p.layout == Layout::Grid3x2) && takeover(d, p)) return;
   int cols, rows;
   gridFor(p, cols, rows);
   if (cols == 0) {
     int n = p.n;
-    int rh = kBodyH / n;
+    int rh = kPageH / n;
     if (rh > 56) rh = 56;
-    int y0 = kBodyY + (kBodyH - rh * n) / 2;
+    int y0 = kPageY + (kPageH - rh * n) / 2;
     for (int i = 0; i < n; i++) listRow(d, p.g[i], kBodyX, y0 + i * rh, kBodyW, rh, p.view);
     return;
   }
   int tw = (kBodyW - (cols - 1) * kGap) / cols;
-  int th = (kBodyH - (rows - 1) * kGap) / rows;
+  int th = (kPageH - (rows - 1) * kGap) / rows;
   int n = p.n < cols * rows ? p.n : cols * rows;
   // One value size for the whole page, so tiles line up: the smallest any tile needs.
   const GFXfont *shared = nullptr;
@@ -674,7 +773,7 @@ void render(Adafruit_GFX &d, const Page &p, const Chrome &c) {
   }
   for (int i = 0; i < n; i++) {
     int cx = i % cols, cy = i / cols;
-    tile(d, p.g[i], kBodyX + cx * (tw + kGap), kBodyY + cy * (th + kGap), tw, th, shared, p.view);
+    tile(d, p.g[i], kBodyX + cx * (tw + kGap), kPageY + cy * (th + kGap), tw, th, shared, p.view);
   }
 }
 

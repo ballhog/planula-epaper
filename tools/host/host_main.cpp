@@ -136,6 +136,17 @@ static void samples() {
   c.alarmCount = 1;
   shot(cv, "2-chem-3x2-alarm", [&](Adafruit_GFX &d) { render(d, q, c); });
   {
+    // Alarm takeover: the chemistry page with its alarm, and with two.
+    shot(cv, "18-takeover-one", [&](Adafruit_GFX &d) { render(d, q, c); });
+    Page q2 = q;
+    for (int k = 0; k < q2.n; k++)
+      if (q2.g[k].status != Status::Alarm) {
+        q2.g[k].status = Status::Alarm;
+        break;
+      }
+    shot(cv, "19-takeover-two", [&](Adafruit_GFX &d) { render(d, q2, c); });
+  }
+  {
     Page qg = q;
     qg.view = View::Graphs;
     qg.g[1].nspark = 0;  // one tile with no trend yet
