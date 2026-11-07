@@ -92,6 +92,7 @@ void toJson(JsonObject o, bool with) {
   d["clock24"] = s.clock24;
   d["view"] = s.view;
   d["buzzer"] = s.buzzer;
+  d["room_offset_c"] = s.roomOffsetC;
   d["temp_f"] = s.tempF;
   d["rotate_s"] = s.rotate_s;
   d["stale_s"] = s.stale_s;
@@ -235,6 +236,7 @@ String applyJson(JsonObjectConst o) {
     }
     if (d["temp_f"].is<bool>()) s.tempF = d["temp_f"];
     if (d["buzzer"].is<bool>()) s.buzzer = d["buzzer"];
+    if (d["room_offset_c"].is<float>()) s.roomOffsetC = constrain(d["room_offset_c"].as<float>(), -10.0f, 10.0f);
     if (d["rotate_s"].is<int>()) s.rotate_s = constrain((int)d["rotate_s"], 0, 7200);
     if (d["stale_s"].is<int>()) s.stale_s = constrain((int)d["stale_s"], 60, 86400);
     if (d["full_every"].is<int>()) s.fullEvery = constrain((int)d["full_every"], 1, 200);

@@ -73,6 +73,7 @@ void readAll() {
   const Settings &s = settings::get();
   float t, h;
   if (shtOk && readSht(t, h)) {
+    t += s.roomOffsetC;
     roomC_ = t;
     roomRh_ = h;
     // Inside the case, next to the ESP32: reads a little warm when awake.

@@ -139,9 +139,11 @@ th{font-size:12px;color:var(--muted);font-weight:500}
   <div id="pwEveryBox"><label>Wake every (min)</label><input id="pwEvery" type="number" min="2" max="240"></div>
   <div id="pwDailyBox"><label>Daily update at</label><input id="pwDaily" type="time"></div></div>
   <label id="pwHourlyBox"><input type="checkbox" id="pwHourly"> Hourly alarm check (wakes for a few seconds, redraws only if something is out of range)</label>
-  <p class="hint">On battery the panel sleeps between updates: press any button for fresh readings, and the settings page answers for 2 minutes after a press. Hydros direct needs a cloud login on every wake, so it uses the most battery; Apex or Coeno are quick.</p>
+  <p class="hint">On battery the panel sleeps between updates: press any button for fresh readings, and the settings page answers for 2 minutes after a press. Apex and Coeno are quick on a wake; Hydros reuses its sign-in for an hour, then signs in again.</p>
   </div>
   <div class="row"><div><label>Tiles show</label><select id="view"><option value="both">Number and trend</option><option value="numbers">Numbers only (big)</option><option value="graphs">Graphs (24 h trend, low/high)</option></select></div></div>
+  <div class="row" id="roomOffBox"><div><label>Room temperature correction (<span id="roomOffUnit">°C</span>)</label><input id="roomOff" type="number" step="0.1" min="-18" max="18"></div></div>
+  <p class="hint" id="roomOffHint">The room sensor sits inside the case next to the processor, so it reads a little warm while the panel is awake (on USB, or for a while after a button press). On battery each reading is taken first thing on waking, before it warms up. If it still reads high next to a thermometer, enter the difference here, e.g. -1.5.</p>
   <label id="buzzerBox"><input type="checkbox" id="buzzer"> Beep on alarms (reTerminal: a new alarm, then every 5 min until you press the middle button)</label>
   <label><input type="checkbox" id="clock24"> 24-hour clock</label>
   <label><input type="checkbox" id="tempF"> Show temperatures in °F (direct mode)</label>
@@ -228,7 +230,7 @@ async function loadSettings(){
  $('hydrosOn').checked=C.hydros.on;$('hydrosUser').value=C.hydros.user;$('hydrosPass').value='';
  $('hydrosPass').placeholder=C.hydros.pass.set?'saved — leave blank to keep':'';
  const d=C.display;$('tz').value=d.tz;if($('tz').value!==d.tz){const o=new Option(d.tz,d.tz);$('tz').add(o);$('tz').value=d.tz}
- {const r=$('rotate'),v=String(d.rotate_s||0);if(![...r.options].some(o=>o.value===v)){const o=document.createElement('option');o.value=v;o.textContent='Every '+v+' s';r.appendChild(o)}r.value=v}$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';
+ {const r=$('rotate'),v=String(d.rotate_s||0);if(![...r.options].some(o=>o.value===v)){const o=document.createElement('option');o.value=v;o.textContent='Every '+v+' s';r.appendChild(o)}r.value=v}$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';{const f=d.temp_f,o=+d.room_offset_c||0;$('roomOffUnit').textContent=f?'°F':'°C';$('roomOff').value=Math.round((f?o*1.8:o)*10)/10;$('roomOffBox').style.display=$('roomOffHint').style.display=(C.power||{}).battery?'':'none'}
  {const K=C.keys||{};
   // One option per page: "Go to page 2 · Chemistry (and back)"
   const names=[];const np=Math.max((C.pages||[]).length,...(C.gauges||[]).map(g=>(g.page||0)+1),0);
@@ -328,7 +330,7 @@ function saveGauges(){const gauges=G.filter(g=>g.key).map(g=>({key:g.key,label:g
 function saveKeys(){save({keys:{left:$('key_left').value,middle:$('key_middle').value,right:$('key_right').value,ack:$('key_ack').value,hold_left:$('key_hold_left').value,hold_middle:$('key_hold_middle').value,hold_right:$('key_hold_right').value}})}
 function pwShow(){const m=$('pwMode').value;$('pwEveryBox').style.display=m==='saver'?'':'none';
  $('pwDailyBox').style.display=m==='daily'?'':'none';$('pwHourlyBox').style.display=m==='daily'?'':'none'}
-function saveDisplay(){save({power:{mode:$('pwMode').value,every_min:+$('pwEvery').value||10,daily_at:$('pwDaily').value||'07:00',hourly_check:$('pwHourly').checked},display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,view:$('view').value,buzzer:$('buzzer').checked,temp_f:$('tempF').checked,
+function saveDisplay(){save({power:{mode:$('pwMode').value,every_min:+$('pwEvery').value||10,daily_at:$('pwDaily').value||'07:00',hourly_check:$('pwHourly').checked},display:{tz:$('tz').value,rotate_s:+$('rotate').value||0,clock24:$('clock24').checked,view:$('view').value,buzzer:$('buzzer').checked,temp_f:$('tempF').checked,room_offset_c:($('tempF').checked?(+$('roomOff').value||0)/1.8:(+$('roomOff').value||0)),
  stale_s:Math.max(1,+$('stale').value||10)*60,full_every:+$('fullEvery').value||60,driver:$('driver').value}})}
 function saveSystem(){const b={name:$('name').value.trim()};if($('adminClear').checked)b.admin_pass={clear:true};else if($('adminPass').value)b.admin_pass=$('adminPass').value;save(b)}
 

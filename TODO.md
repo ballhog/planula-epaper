@@ -64,7 +64,7 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
   credentials (good for ~1 h) and reuse them.
 - [ ] **11. Measure the battery.** One night on Saver (15 min), % before and
   after. Decides whether Saver is enough or Daily + hourly check is the default.
-- [ ] **12. Honest room temperature.** The SHT4x sits by the ESP32 and reads
+- [x] **12. Honest room temperature.** (Reading at boot/wake was already first, before Wi-Fi; added the correction setting.) The SHT4x sits by the ESP32 and reads
   warm once awake. Read it first thing on a wake, before Wi-Fi heats the
   board, and add an offset setting.
 - [ ] **13. Glance cues.** A trend arrow (↑ ↓) on the Numbers view; a small mark

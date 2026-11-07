@@ -64,6 +64,7 @@ struct Settings {
   String dailyAt = "07:00";
   bool hourlyCheck = true;
   bool buzzer = true;
+  float roomOffsetC = 0;     // reTerminal room sensor correction (it sits by the ESP32)
   // reTerminal short presses: prev | next | view | refresh | info | none.
   String keyLeft = "prev", keyMid = "view", keyRight = "next";
   // Held 3 s (on release); same actions. Middle held 10 s = setup network (fixed).
