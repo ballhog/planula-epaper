@@ -30,10 +30,18 @@ FONTS = [
     ('NumL',   'Inter-Bold.otf',     84, 'num'),
     ('NumLL',  'Inter-Bold.otf',    104, 'num'),
     ('NumXL',  'Inter-Bold.otf',    128, 'num'),
+    # Past what Adafruit GFX can hold (its glyph offsets are int8, ~128 px):
+    # BigFont format (BigFont.h), drawn by Text.cpp. Big values on pages with
+    # one or two tiles.
+    ('HugeS',  'Inter-Bold.otf',    150, 'big'),
+    ('HugeM',  'Inter-Bold.otf',    176, 'big'),
+    ('HugeL',  'Inter-Bold.otf',    240, 'big'),
 ]
 
 
 def glyph_list(kind):
+    if kind == 'big':
+        kind = 'num'
     if kind == 'full':
         return [chr(c) for c in range(0x20, 0x7F)] + EXTRAS, 0x20
     # ' ' (0x20) .. '9' (0x39): space, sign, dot, digits, '-' etc.
@@ -86,6 +94,17 @@ def build(name, path, px, kind, out_dir):
     for i in range(0, len(bitmap), 16):
         lines.append('  ' + ', '.join(f'0x{b:02X}' for b in bitmap[i:i + 16]) + ',')
     lines.append('};')
+    if kind == 'big':
+        lines[2] = '#include "BigFont.h"'
+        lines.append(f'const BigGlyph {sym}Glyphs[] PROGMEM = {{')
+        for off, w, h, adv, xo, yo, ch in glyphs:
+            lines.append(f'  {{{off:6d}, {w:3d}, {h:3d}, {adv:3d}, {xo:4d}, {yo:4d}}},  // {ch}')
+        lines.append('};')
+        last = first + len(chars) - 1
+        lines.append(f'const BigFont {sym} = {{{sym}Bitmaps, {sym}Glyphs, 0x{first:02X}, 0x{last:02X}, {y_adv}, {asc}}};')
+        with open(os.path.join(out_dir, f'{sym}.h'), 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        return sym, len(bitmap), asc
     lines.append(f'const GFXglyph {sym}Glyphs[] PROGMEM = {{')
     for off, w, h, adv, xo, yo, ch in glyphs:
         label = ch if ch.isprintable() and ch not in '\\' else hex(ord(ch))

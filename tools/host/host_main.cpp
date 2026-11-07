@@ -13,6 +13,7 @@
 
 #include "BandCanvas.h"
 #include "Model.h"
+#include "Rules.h"
 #include "PageJson.h"
 #include "Render.h"
 #include "SigV4.h"
@@ -21,6 +22,7 @@
 using namespace panel;
 
 static int failures = 0;
+static void testRules();
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); failures++; } } while (0)
 
 static void savePbm(GFXcanvas1 &c, const char *name) {
@@ -237,6 +239,16 @@ static void samples() {
   s.n = 1;
   chromeFor(c, 2, 3);
   shot(cv, "4-single", [&](Adafruit_GFX &d) { render(d, s, c); });
+  {
+    Page sn = s;
+    sn.view = View::Numbers;
+    shot(cv, "22-single-numbers", [&](Adafruit_GFX &d) { render(d, sn, c); });
+    // Two tiles side by side (first two of the tank page), Numbers view.
+    Page two = p;
+    two.n = 2;
+    two.view = View::Numbers;
+    shot(cv, "23-two-numbers", [&](Adafruit_GFX &d) { render(d, two, c); });
+  }
 
   // 14. Sparkline y-range from Coeno (spark_lo/spark_hi): the same quiet pH
   // trace drawn without (left, fills the box) and with a 0.4 range (right,
@@ -463,7 +475,170 @@ static void tests() {
   CHECK(iot.find("&X-Amz-Security-Token=tok%2Fen%2B") != std::string::npos);
   CHECK(iot.find("X-Amz-Security-Token") > iot.find("X-Amz-Signature"));
 
+  testRules();
   printf(failures ? "%d test(s) FAILED\n" : "all tests passed\n", failures);
+}
+
+
+// ── rules: battery redraws, wake times, outlets, controller states ─────────
+static Gauge gauge(const char *label, const char *unit, float v, uint8_t dec, Status st = Status::Ok) {
+  Gauge g;
+  PANEL_COPY(g.label, label);
+  PANEL_COPY(g.unit, unit);
+  g.has = true;
+  g.value = v;
+  g.dec = dec;
+  g.status = st;
+  return g;
+}
+
+static void testRules() {
+  using namespace rules;
+  // signed elapsed time: a stamp a little newer than "now" is not 49 days old
+  CHECK(since(1000, 1500) < 0);
+  CHECK(since(5000, 1000) == 4000);
+  CHECK(since(100, 0xFFFFFF00u) == 356);  // across the millis() wrap
+
+  // redraw steps
+  CHECK(fabsf(redrawStep(gauge("1R pH", "", 8.1f, 2)) - 0.02f) < 1e-6f);
+  CHECK(fabsf(redrawStep(gauge("Temp", "°F", 77.8f, 1)) - 0.2f) < 1e-6f);
+  CHECK(fabsf(redrawStep(gauge("Temp", "°C", 25.9f, 1)) - 0.1f) < 1e-6f);
+  CHECK(fabsf(redrawStep(gauge("Salinity", "ppt", 33.0f, 1)) - 0.1f) < 1e-6f);
+  CHECK(fabsf(redrawStep(gauge("ORP", "mV", 312, 0)) - 5.0f) < 1e-6f);
+  CHECK(fabsf(redrawStep(gauge("Calcium", "ppm", 420, 0)) - 4.2f) < 1e-4f);
+
+  // compare: under the step = no move; a status change; a new page
+  Page p;
+  p.n = 2;
+  p.g[0] = gauge("1R pH", "", 8.10f, 2);
+  p.g[1] = gauge("Salinity", "ppt", 33.0f, 1);
+  Drawn d;
+  remember(p, 0, d);
+  bool moved, st;
+  p.g[0].value = 8.11f;
+  compare(p, 0, d, moved, st);
+  CHECK(!moved && !st);
+  p.g[0].value = 8.12f;
+  compare(p, 0, d, moved, st);
+  CHECK(moved && !st);
+  p.g[0].value = 8.10f;
+  p.g[1].status = Status::Warn;
+  compare(p, 0, d, moved, st);
+  CHECK(!moved && st);
+  compare(p, 1, d, moved, st);
+  CHECK(moved && st);
+  p.g[1].status = Status::Ok;
+  p.g[1].has = false;
+  compare(p, 0, d, moved, st);
+  CHECK(moved);
+
+  // which wakes redraw
+  CHECK(shouldRedraw(Wake::Daily, false, false, 10));
+  CHECK(!shouldRedraw(Wake::Hourly, true, false, 7200));
+  CHECK(shouldRedraw(Wake::Hourly, false, true, 10));
+  CHECK(!shouldRedraw(Wake::Saver, false, false, 600));
+  CHECK(shouldRedraw(Wake::Saver, false, false, 3600));
+  CHECK(shouldRedraw(Wake::Saver, true, false, 60));
+
+  // wake times in Detroit, across midnight and the DST change (Nov 1 2026)
+  setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
+  tzset();
+  auto at = [](int y, int mo, int dd, int h, int mi) {
+    struct tm tm = {};
+    tm.tm_year = y - 1900; tm.tm_mon = mo - 1; tm.tm_mday = dd; tm.tm_hour = h; tm.tm_min = mi; tm.tm_isdst = -1;
+    return mktime(&tm);
+  };
+  auto hm = [](time_t t, int &h, int &m, int &day) {
+    struct tm tm;
+    localtime_r(&t, &tm);
+    h = tm.tm_hour; m = tm.tm_min; day = tm.tm_mday;
+  };
+  int h, m, day;
+  hm(nextAt(at(2026, 11, 6, 22, 0), 7, 0), h, m, day);
+  CHECK(h == 7 && m == 0 && day == 7);
+  hm(nextAt(at(2026, 11, 7, 6, 0), 7, 0), h, m, day);
+  CHECK(h == 7 && m == 0 && day == 7);
+  hm(nextAt(at(2026, 10, 31, 20, 0), 7, 0), h, m, day);  // the night the clocks go back
+  CHECK(h == 7 && m == 0 && day == 1);
+  Wake why;
+  time_t now = at(2026, 11, 7, 3, 40);
+  time_t w = nextWake(now, true, 'd', 10, 7, 0, true, why);
+  hm(w, h, m, day);
+  CHECK(why == Wake::Hourly && h == 4 && m == 0);
+  w = nextWake(at(2026, 11, 7, 6, 59), true, 'd', 10, 7, 0, true, why);
+  hm(w, h, m, day);
+  CHECK(why == Wake::Daily && h == 7 && m == 0);
+  w = nextWake(now, true, 'd', 10, 7, 0, false, why);
+  CHECK(why == Wake::Daily);
+  w = nextWake(now, true, 's', 10, 7, 0, true, why);
+  CHECK(why == Wake::Saver && w - now == 600);
+  w = nextWake(now, false, 'd', 10, 7, 0, true, why);
+  CHECK(why == Wake::Saver && w - now == 3600);
+
+  // outlet history: small ramp steps dropped, on/off always kept
+  OutletHistory oh;
+  oh.record(0, 0);
+  oh.record(1000, 2);   // to on: kept
+  oh.record(2000, 4);   // +2: dropped
+  oh.record(3000, 9);   // +7 from 2: kept
+  oh.record(4000, 0);   // off: kept
+  oh.record(5000, 0);   // same: dropped
+  CHECK(oh.len == 4);
+  for (int i = 0; i < 60; i++) oh.record(6000 + i * 1000, (i % 2) ? 100 : 0);
+  CHECK(oh.len == kHist);  // full, oldest dropped
+
+  // lanes over a 12 h window: state at the window start, then changes
+  OutletHistory heater;
+  uint32_t H = 3600000u, nowMs = 20 * H;
+  heater.record(1 * H, 100);   // 19 h ago: before the window
+  heater.record(10 * H, 0);    // 10 h ago
+  heater.record(15 * H, 100);  // 5 h ago
+  int16_t t[48];
+  float v[48];
+  int n = lanePoints(heater, nowMs, -720, false, false, t, v, 48);
+  CHECK(n == 3 && t[0] == -720 && v[0] == 1 && t[1] == -600 && v[1] == 0 && t[2] == -300 && v[2] == 1);
+  // nothing inside the window: just the current state from the start
+  OutletHistory old;
+  old.record(1 * H, 100);
+  n = lanePoints(old, nowMs, -720, false, false, t, v, 48);
+  CHECK(n == 1 && t[0] == -720 && v[0] == 1);
+  // dosers: one mark per dose start inside the window
+  OutletHistory dose;
+  dose.record(5 * H, 100);
+  dose.record(5 * H + 30000, 0);
+  dose.record(12 * H, 100);
+  dose.record(12 * H + 30000, 0);
+  dose.record(18 * H, 100);
+  n = lanePoints(dose, nowMs, -720, true, false, t, v, 48);
+  CHECK(n == 2 && t[0] == -480 && t[1] == -120 && isnan(v[0]));
+  // a wrapped millis() clock still gives the right ages
+  OutletHistory wrap;
+  wrap.record(0xFFFFFFFFu - 600000u, 100);  // 10 min before the wrap
+  n = lanePoints(wrap, 600000u, -720, false, false, t, v, 48);
+  CHECK(n == 1 && t[0] == -20);
+
+  // Hydros Output entries (as logged from Joe's Hydros, 2026-11-06)
+  CHECK(hydrosLevel(10000, NAN, NAN, false) == 100);  // 1RTunzeSmp
+  CHECK(hydrosLevel(0, NAN, NAN, true) == 0);         // 1RX10D1-Part C idle
+  CHECK(hydrosLevel(2500, NAN, NAN, true) == 100);    // doser running: on/off
+  CHECK(hydrosLevel(4250, NAN, NAN, false) == 43);    // dimmed light
+  CHECK(hydrosLevel(30, NAN, NAN, false) == 1);       // barely on is still on
+  CHECK(hydrosLevel(0, 0, 0, false) == 0);            // 1R WATERCHANGE idle
+  CHECK(hydrosLevel(0, 0, 10000, false) == 100);      // filling
+  CHECK(hydrosLevel(NAN, NAN, NAN, false) == 0);
+
+  // Apex output status
+  bool on, man, hid;
+  apexOutput("AON", "outlet", on, man, hid);
+  CHECK(on && !man && !hid);
+  apexOutput("OFF", "outlet", on, man, hid);
+  CHECK(!on && man);
+  apexOutput("ON", "24v", on, man, hid);
+  CHECK(on && man);
+  apexOutput("AOF", "virtual", on, man, hid);
+  CHECK(!on && hid);
+  apexOutput("TBL", "variable", on, man, hid);
+  CHECK(on && !man);
 }
 
 int main(int argc, char **argv) {

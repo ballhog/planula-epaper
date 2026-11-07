@@ -14,8 +14,8 @@ fi
 mkdir -p out
 cc -O1 -c "$ROOT/lib/qrcodegen/src/qrcodegen.c" -o out/qrcodegen.o
 c++ -std=c++17 -DARDUINO=200 -DARDUINOJSON_ENABLE_ARDUINO_STRING=0 -DARDUINOJSON_ENABLE_ARDUINO_STREAM=0 -DARDUINOJSON_ENABLE_ARDUINO_PRINT=0 -DARDUINOJSON_ENABLE_PROGMEM=0 -O1 -Wall -Wno-unused-function \
-  -Istub -I"$GFX" -I"$JSON" -I"$ROOT/lib/panel/src" -I"$ROOT/lib/qrcodegen/src" -I"$ROOT/lib/sigv4/src" \
-  host_main.cpp "$ROOT"/lib/panel/src/*.cpp "$ROOT"/lib/sigv4/src/*.cpp "$GFX/Adafruit_GFX.cpp" out/qrcodegen.o -o out/host
+  -Istub -I"$GFX" -I"$JSON" -I"$ROOT/lib/panel/src" -I"$ROOT/lib/qrcodegen/src" -I"$ROOT/lib/sigv4/src" -I"$ROOT/lib/rules/src" \
+  host_main.cpp "$ROOT"/lib/panel/src/*.cpp "$ROOT"/lib/sigv4/src/*.cpp "$ROOT"/lib/rules/src/*.cpp "$GFX/Adafruit_GFX.cpp" out/qrcodegen.o -o out/host
 ./out/host render
 python3 - <<'EOF'
 import glob, os

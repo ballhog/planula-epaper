@@ -16,6 +16,7 @@
 #include "WsTransport.h"
 #include "Worker.h"
 #include "Outlets.h"
+#include "Rules.h"
 #include "miniz.h"
 
 namespace hydros {
@@ -398,11 +399,7 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     float dr = numberOf(o["drainvalueState"]), fi = numberOf(o["fillvalueState"]);
     if (isnan(v) && isnan(dr) && isnan(fi)) continue;
     bool doser = !o["rpm"].isNull(), wc = !isnan(dr) || !isnan(fi);
-    // valueState 0..10000 = 0-100 %; the water-change pair counts as on/off.
-    uint8_t level = 0;
-    if (wc) level = ((!isnan(dr) && dr > 0) || (!isnan(fi) && fi > 0) || (!isnan(v) && v > 0)) ? 100 : 0;
-    else if (!isnan(v)) level = (uint8_t)constrain((int)lroundf(v / 100.0f), v > 0 ? 1 : 0, 100);
-    if (doser && level) level = 100;  // a dosing head runs at speed: on/off
+    uint8_t level = rules::hydrosLevel(v, dr, fi, doser);
     String key = "hydros:" + thing + "/" + kv.key().c_str();
     outlets::update(key.c_str(), "Hydros", doser ? "doser" : wc ? "wc" : "output", level, o["override"] | false, false);
   }
@@ -614,7 +611,7 @@ void loop() {
     }
     // Signed differences: lastMsg is written by the MQTT task and can be a
     // little newer than `now`; unsigned it would wrap to "silent for 49 days".
-    int32_t sinceStart = (int32_t)(now - sessionStart), sinceMsg = (int32_t)(now - lastMsg);
+    int32_t sinceStart = rules::since(now, sessionStart), sinceMsg = rules::since(now, lastMsg);
     bool expired = sinceStart > (int32_t)kRebuildMs;
     bool silent = connected && sinceMsg > (int32_t)kSilentMs;
     bool dropped = !connected && sinceStart > 30000;

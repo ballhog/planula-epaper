@@ -14,7 +14,6 @@ namespace outlets {
 
 constexpr int kMax = 40;      // outputs listed
 constexpr int kPicked = 8;    // outputs with history (timeline lanes)
-constexpr int kHist = 46;     // state changes kept per picked output
 
 struct Out {
   char key[44];     // "apex:Return"

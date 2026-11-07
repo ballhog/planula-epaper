@@ -10,6 +10,9 @@
 #include "fonts/InterNumM.h"
 #include "fonts/InterNumS.h"
 #include "fonts/InterNumXL.h"
+#include "fonts/InterHugeL.h"
+#include "fonts/InterHugeM.h"
+#include "fonts/InterHugeS.h"
 #include "fonts/InterSmall.h"
 
 #ifndef pgm_read_byte
@@ -28,6 +31,9 @@ const GFXfont *NumM = &InterNumM;
 const GFXfont *NumL = &InterNumL;
 const GFXfont *NumLL = &InterNumLL;
 const GFXfont *NumXL = &InterNumXL;
+const BigFont *HugeS = &InterHugeS;
+const BigFont *HugeM = &InterHugeM;
+const BigFont *HugeL = &InterHugeL;
 }  // namespace font
 
 namespace {
@@ -143,6 +149,75 @@ int drawTextFit(Adafruit_GFX &d, const GFXfont *f, int x, int y, const char *utf
     if (n + 2 < sizeof buf) { buf[n++] = '.'; buf[n++] = '.'; buf[n] = 0; }
   }
   return drawGlyphs(d, f, x, y, buf, color, a);
+}
+
+}  // namespace panel
+
+namespace panel {
+
+// ── BigFont ─────────────────────────────────────────────────────────────
+
+static const BigGlyph *bigGlyph(const BigFont *f, uint8_t c) {
+  if (c < f->first || c > f->last) return nullptr;
+  return &f->glyph[c - f->first];
+}
+
+static int bigWidth(const BigFont *f, const char *glyphs) {
+  int w = 0;
+  for (const uint8_t *p = (const uint8_t *)glyphs; *p; p++) {
+    const BigGlyph *g = bigGlyph(f, *p);
+    w += g ? g->adv : f->yAdvance / 4;
+  }
+  return w;
+}
+
+// Bits run on across rows (GFX packing); draw each row's runs as lines.
+static void bigChar(Adafruit_GFX &d, const BigFont *f, const BigGlyph *g, int x, int y, uint16_t color) {
+  const uint8_t *bm = f->bitmap + g->off;
+  uint32_t bit = 0;
+  for (int r = 0; r < g->h; r++) {
+    int run = -1;
+    for (int c = 0; c < g->w; c++, bit++) {
+      bool on = (pgm_read_byte(&bm[bit >> 3]) >> (7 - (bit & 7))) & 1;
+      if (on && run < 0) run = c;
+      if (!on && run >= 0) {
+        d.drawFastHLine(x + g->xo + run, y + g->yo + r, c - run, color);
+        run = -1;
+      }
+    }
+    if (run >= 0) d.drawFastHLine(x + g->xo + run, y + g->yo + r, g->w - run, color);
+  }
+}
+
+int ascent(const VFont &f) {
+  if (f.b) return f.b->ascent;
+  return f.g ? ascent(f.g) : 0;
+}
+
+int textWidth(const VFont &f, const char *utf8) {
+  if (!f.b) return f.g ? textWidth(f.g, utf8) : 0;
+  char buf[64];
+  toGlyphs(utf8, buf, sizeof buf);
+  return bigWidth(f.b, buf);
+}
+
+int drawText(Adafruit_GFX &d, const VFont &f, int x, int y, const char *utf8, uint16_t color, Align a) {
+  if (!f.b) return f.g ? drawText(d, f.g, x, y, utf8, color, a) : 0;
+  char buf[64];
+  toGlyphs(utf8, buf, sizeof buf);
+  int w = bigWidth(f.b, buf);
+  if (a == Center) x -= w / 2;
+  else if (a == Right) x -= w;
+  for (const uint8_t *p = (const uint8_t *)buf; *p; p++) {
+    const BigGlyph *g = bigGlyph(f.b, *p);
+    if (!g) {
+      x += f.b->yAdvance / 4;
+      continue;
+    }
+    if (g->w && g->h) bigChar(d, f.b, g, x, y, color);
+    x += g->adv;
+  }
+  return w;
 }
 
 }  // namespace panel

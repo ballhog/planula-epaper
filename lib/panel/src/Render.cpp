@@ -68,9 +68,9 @@ int pill(Adafruit_GFX &d, int xRight, int yTop, const char *text, uint16_t fg, u
   return w;
 }
 
-const GFXfont *valueFontFor(int w, int h, const char *val, int unitW) {
-  const GFXfont *cands[] = {font::NumXL, font::NumLL, font::NumL, font::NumM, font::NumS};
-  for (const GFXfont *f : cands) {
+VFont valueFontFor(int w, int h, const char *val, int unitW) {
+  const VFont cands[] = {font::HugeL, font::HugeM, font::HugeS, font::NumXL, font::NumLL, font::NumL, font::NumM, font::NumS};
+  for (const VFont &f : cands) {
     int asc = ascent(f);
     if (asc > h) continue;
     if (textWidth(f, val) + unitW + 8 <= w) return f;
@@ -211,6 +211,13 @@ TileGeom geom(const Gauge &g, int w, int h, View view) {
   return t;
 }
 
+// Units grow with the value: 26 px up to ~100 px values, then 28, then 34.
+static const GFXfont *unitFontFor(int valueAscent) {
+  if (valueAscent >= 140) return font::NumS;
+  if (valueAscent >= 100) return font::Head;
+  return font::Label;
+}
+
 // Numbers view: the value as big as the tile allows, centred, with the unit
 // beside it when that fits and under it otherwise. Values of 100 and up drop
 // their decimals here (397, not 397.0).
@@ -220,16 +227,18 @@ static void numbersText(const Gauge &g, char *val, size_t n) {
   formatValue(t, val, n);
 }
 
-static const GFXfont *numbersFont(const Gauge &g, int w, int h, const TileGeom &t) {
+static VFont numbersFont(const Gauge &g, int w, int h, const TileGeom &t) {
   char val[16];
   numbersText(g, val, sizeof val);
   // The unit sits in the lower-right corner; its line is always reserved
   // (unit or not) so values line up across a row.
   int areaW = w - 2 * t.pad, areaH = h - t.ly - t.pad - 6 - ascent(font::Label) - 8;
+  // Room for a bigger unit too when the tile is big enough for a huge value.
+  if (areaH > 160) areaH -= ascent(font::NumS) - ascent(font::Label);
   return valueFontFor(areaW, areaH, val, 0);
 }
 
-const GFXfont *tileValueFont(const Gauge &g, int w, int h, View view) {
+VFont tileValueFont(const Gauge &g, int w, int h, View view) {
   TileGeom t = geom(g, w, h, view);
   if (view == View::Numbers) return numbersFont(g, w, h, t);
   char val[16];
@@ -260,7 +269,7 @@ static void sparkMinMax(const Gauge &g, char *lo, char *hi, size_t n) {
   formatValue(t, hi, n);
 }
 
-void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFXfont *vfShared, View view) {
+void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, VFont vfShared, View view) {
   bool alarm = g.status == Status::Alarm;
   uint16_t fg = alarm ? PAPER : INK, bg = alarm ? INK : PAPER;
   if (alarm) d.fillRoundRect(x, y, w, h, 10, INK);
@@ -296,14 +305,15 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
   formatValue(g, val, sizeof val);
   const GFXfont *uf = t.uf;
   bool wantSpark = t.wantSpark;
-  const GFXfont *vf = vfShared ? vfShared : tileValueFont(g, w, h, view);
+  VFont vf = vfShared.ok() ? vfShared : tileValueFont(g, w, h, view);
   if (view == View::Numbers) {
     // The value centred between the label row and the unit line; the unit in
     // the lower-right corner, a size up from the other views. The unit line
     // is reserved even without a unit so values in a row share a baseline.
     numbersText(g, val, sizeof val);
-    const GFXfont *nuf = font::Label;
-    int va = ascent(vf), ua = ascent(nuf);
+    int va = ascent(vf);
+    const GFXfont *nuf = unitFontFor(va);
+    int ua = ascent(nuf);
     int top = ly + 6, bottom = y + h - pad - ua - 8;
     int base = top + (bottom - top - va) / 2 + va;
     drawText(d, vf, x + w / 2, base, val, fg, Center);
@@ -314,7 +324,7 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
   int vy = ly + 14 + va;
   if (!wantSpark) vy = y + h / 2 + (ly - y) / 2 + va / 2 - 4;
   int vw = drawText(d, vf, x + pad - (big ? 4 : 2), vy, val, fg);
-  if (g.unit[0]) drawText(d, uf, x + pad + vw + 4, vy, g.unit, fg);
+  if (g.unit[0]) drawText(d, va >= 140 ? unitFontFor(va) : uf, x + pad + vw + 6, vy, g.unit, fg);
 
   // Graphs view: the trend fills the rest, low / high of the last 24 h under it.
   if (wantSpark && t.graphs) {
@@ -870,10 +880,10 @@ void render(Adafruit_GFX &d, const Page &p, const Chrome &c) {
   int th = (kPageH - (rows - 1) * kGap) / rows;
   int n = p.n < cols * rows ? p.n : cols * rows;
   // One value size for the whole page, so tiles line up: the smallest any tile needs.
-  const GFXfont *shared = nullptr;
+  VFont shared;
   for (int i = 0; i < n; i++) {
-    const GFXfont *f = tileValueFont(p.g[i], tw, th, p.view);
-    if (!shared || ascent(f) < ascent(shared)) shared = f;
+    VFont f = tileValueFont(p.g[i], tw, th, p.view);
+    if (!shared.ok() || ascent(f) < ascent(shared)) shared = f;
   }
   for (int i = 0; i < n; i++) {
     int cx = i % cols, cy = i / cols;

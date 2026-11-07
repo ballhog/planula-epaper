@@ -7,6 +7,7 @@
 #include <esp_heap_caps.h>
 
 #include "Outlets.h"
+#include "Rules.h"
 #include "Readings.h"
 #include "Worker.h"
 #include "Settings.h"
@@ -150,9 +151,8 @@ static String poll(const String &hostIn, const String &user, const String &pass,
       if (!name.length()) continue;
       String type = o["type"] | "";
       String st = o["status"][0] | "";
-      bool manual = st == "ON" || st == "OFF";
-      bool on = st == "ON" || st == "AON" || st == "TBL";
-      bool hidden = type == "virtual" || type == "alert" || type == "serial";
+      bool on, manual, hidden;
+      rules::apexOutput(st.c_str(), type.c_str(), on, manual, hidden);
       outlets::update(("apex:" + name).c_str(), "Apex", type.c_str(), on ? 100 : 0, manual, hidden);
     }
   }

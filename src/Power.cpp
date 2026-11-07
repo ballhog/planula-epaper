@@ -19,6 +19,7 @@
 #include "Model.h"
 #include "Net.h"
 #include "Readings.h"
+#include "Rules.h"
 #include "Worker.h"
 
 namespace power {
@@ -29,7 +30,7 @@ constexpr uint32_t kMagic = 0x504C4E31;  // "PLN1"
 constexpr int kKeep = 12;                // readings carried across sleep
 constexpr uint32_t kAwakeKeyMs = 120000, kAwakeBootMs = 300000;
 constexpr uint64_t kWakeMask = (1ULL << 3) | (1ULL << 4) | (1ULL << 5);  // the three keys
-enum class Wake : uint8_t { None, Saver, Daily, Hourly };
+using rules::Wake;
 
 // Kept in RTC memory through deep sleep (lost on power-off or reset).
 struct Rtc {
@@ -40,9 +41,7 @@ struct Rtc {
   uint8_t page;
   bool acked;
   uint32_t ackSig;
-  uint8_t nVals, valsPage;
-  float vals[panel::kMaxGauges];
-  uint8_t stat[panel::kMaxGauges];
+  rules::Drawn drawn;     // what the screen shows
   uint8_t nr;
   readings::Reading r[kKeep];  // times stored as ages (ms) at savedAt
 };
@@ -60,35 +59,6 @@ String hhmm(time_t t) {
   if (settings::get().clock24) strftime(b, sizeof b, "%H:%M", &tm);
   else snprintf(b, sizeof b, "%d:%02d", tm.tm_hour % 12 ? tm.tm_hour % 12 : 12, tm.tm_min);
   return b;
-}
-
-// How much a value must move before a battery-mode redraw.
-float stepFor(const panel::Gauge &g) {
-  String u = g.unit;
-  if (u == "°C") return 0.1f;
-  if (u == "°F") return 0.2f;
-  if (u == "ppt" || u == "dKH" || u == "PSU") return 0.1f;
-  if (u == "mV") return 5.0f;
-  if (u == "%") return 2.0f;
-  if (u == "ppm") return max(1.0f, fabsf(g.value) * 0.01f);
-  String l = g.label;
-  l.toLowerCase();
-  if (u == "pH" || l.indexOf("ph") >= 0) return 0.02f;
-  float d = powf(10.0f, -(float)g.dec);
-  return max(2.0f * d, fabsf(g.value) * 0.01f);
-}
-
-// Next wall-clock time today/tomorrow at "HH:MM" (local).
-time_t nextAt(time_t now, const String &at) {
-  int h = at.substring(0, 2).toInt(), m = at.substring(3, 5).toInt();
-  struct tm tm;
-  localtime_r(&now, &tm);
-  tm.tm_hour = h;
-  tm.tm_min = m;
-  tm.tm_sec = 0;
-  time_t t = mktime(&tm);
-  if (t <= now + 30) t += 86400;
-  return t;
 }
 
 void saveState() {
@@ -130,29 +100,8 @@ void restoreState() {
 }
 
 void remember(const panel::Page &p) {
-  rtc.nVals = p.n;
-  rtc.valsPage = app::page();
-  for (int i = 0; i < p.n; i++) {
-    rtc.vals[i] = p.g[i].has ? p.g[i].value : NAN;
-    rtc.stat[i] = (uint8_t)p.g[i].status;
-  }
+  rules::remember(p, (uint8_t)app::page(), rtc.drawn);
   rtc.drawnAt = time(nullptr);
-}
-
-// What changed since the screen was drawn.
-void compare(const panel::Page &p, bool &moved, bool &statusChanged) {
-  moved = statusChanged = false;
-  if (rtc.magic != kMagic || rtc.nVals != p.n || rtc.valsPage != app::page()) {
-    moved = statusChanged = true;
-    return;
-  }
-  for (int i = 0; i < p.n; i++) {
-    const panel::Gauge &g = p.g[i];
-    if ((uint8_t)g.status != rtc.stat[i]) statusChanged = true;
-    float was = rtc.vals[i];
-    if (g.has != !isnan(was)) moved = true;
-    else if (g.has && fabsf(g.value - was) >= stepFor(g)) moved = true;
-  }
 }
 
 bool dataReady() {
@@ -176,25 +125,9 @@ void goToSleep() {
   const Settings &s = settings::get();
   time_t now = time(nullptr);
   bool clock = net::timeValid();
-  time_t at;
   Wake why;
-  if (!clock) {
-    at = now + 3600;
-    why = Wake::Saver;
-  } else if (s.power == "saver") {
-    at = now + (time_t)s.saverMin * 60;
-    why = Wake::Saver;
-  } else {  // daily
-    at = nextAt(now, s.dailyAt);
-    why = Wake::Daily;
-    if (s.hourlyCheck) {
-      time_t hour = (now / 3600 + 1) * 3600 + 20;
-      if (hour < at - 120) {
-        at = hour;
-        why = Wake::Hourly;
-      }
-    }
-  }
+  int dh = s.dailyAt.substring(0, 2).toInt(), dm = s.dailyAt.substring(3, 5).toInt();
+  time_t at = rules::nextWake(now, clock, s.power == "saver" ? 's' : 'd', s.saverMin, dh, dm, s.hourlyCheck, why);
   uint32_t secs = (uint32_t)max<time_t>(30, at - now);
   rtc.next = why;
   saveState();
@@ -271,11 +204,10 @@ void loop() {
     bool draw = true;
     if (p && app::currentPage(*p)) {
       bool moved, statusChanged;
-      compare(*p, moved, statusChanged);
+      if (rtc.magic == kMagic) rules::compare(*p, (uint8_t)app::page(), rtc.drawn, moved, statusChanged);
+      else moved = statusChanged = true;
       uint32_t sinceDraw = rtc.drawnAt ? (uint32_t)(time(nullptr) - rtc.drawnAt) : UINT32_MAX;
-      if (rtc.next == Wake::Daily) draw = true;
-      else if (rtc.next == Wake::Hourly) draw = statusChanged;
-      else draw = moved || statusChanged || sinceDraw >= 3600;
+      draw = rules::shouldRedraw(rtc.next, moved, statusChanged, sinceDraw);
       Serial.printf("[power] %s wake: %s%s%s -> %s\n",
                     rtc.next == Wake::Daily ? "daily" : rtc.next == Wake::Hourly ? "hourly" : "saver",
                     moved ? "values moved " : "", statusChanged ? "status changed " : "",
@@ -312,8 +244,7 @@ String nextWakeText() {
   const Settings &s = settings::get();
   time_t now = time(nullptr);
   if (s.power == "saver") return hhmm(now + (time_t)s.saverMin * 60);
-  time_t at = nextAt(now, s.dailyAt);
-  return hhmm(at);
+  return hhmm(rules::nextAt(now, s.dailyAt.substring(0, 2).toInt(), s.dailyAt.substring(3, 5).toInt()));
 }
 
 String status() {

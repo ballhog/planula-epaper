@@ -133,7 +133,7 @@ th{font-size:12px;color:var(--muted);font-weight:500}
    <option value="EST5EDT,M3.2.0,M11.1.0">Eastern (Detroit)</option><option value="CST6CDT,M3.2.0,M11.1.0">Central</option>
    <option value="MST7MDT,M3.2.0,M11.1.0">Mountain</option><option value="MST7">Arizona</option><option value="PST8PDT,M3.2.0,M11.1.0">Pacific</option>
    <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe</option><option value="GMT0BST,M3.5.0/1,M10.5.0">UK</option><option value="UTC0">UTC</option></select></div>
-   <div><label>Change page every (seconds, 0 = only with the button)</label><input id="rotate" type="number" min="0"></div></div>
+   <div><label>Change page</label><select id="rotate"><option value="0">Only with the buttons</option><option value="120">Every 2 min</option><option value="300">Every 5 min</option><option value="900">Every 15 min</option><option value="1800">Every 30 min</option><option value="3600">Every 60 min</option><option value="7200">Every 2 h</option></select></div></div>
   <div id="powerBox" style="display:none">
   <div class="row"><div><label>Power</label><select id="pwMode" onchange="pwShow()"><option value="live">Live: always on (wall power)</option><option value="saver">Saver: wake every few minutes</option><option value="daily">Daily: once a day</option></select></div>
   <div id="pwEveryBox"><label>Wake every (min)</label><input id="pwEvery" type="number" min="2" max="240"></div>
@@ -228,7 +228,7 @@ async function loadSettings(){
  $('hydrosOn').checked=C.hydros.on;$('hydrosUser').value=C.hydros.user;$('hydrosPass').value='';
  $('hydrosPass').placeholder=C.hydros.pass.set?'saved — leave blank to keep':'';
  const d=C.display;$('tz').value=d.tz;if($('tz').value!==d.tz){const o=new Option(d.tz,d.tz);$('tz').add(o);$('tz').value=d.tz}
- $('rotate').value=d.rotate_s;$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';
+ {const r=$('rotate'),v=String(d.rotate_s||0);if(![...r.options].some(o=>o.value===v)){const o=document.createElement('option');o.value=v;o.textContent='Every '+v+' s';r.appendChild(o)}r.value=v}$('clock24').checked=d.clock24;$('view').value=d.view||'both';$('buzzer').checked=d.buzzer!==false;$('buzzerBox').style.display=(C.power||{}).battery?'':'none';
  {const K=C.keys||{};
   // One option per page: "Go to page 2 · Chemistry (and back)"
   const names=[];const np=Math.max((C.pages||[]).length,...(C.gauges||[]).map(g=>(g.page||0)+1),0);

@@ -4,6 +4,10 @@
 #pragma once
 #include <Adafruit_GFX.h>
 
+#include <stddef.h>
+
+#include "BigFont.h"
+
 namespace panel {
 
 namespace font {
@@ -16,7 +20,23 @@ extern const GFXfont *NumM;    // 54 px  digits only
 extern const GFXfont *NumL;    // 84 px  digits only
 extern const GFXfont *NumLL;   // 104 px digits only (Numbers view: between L and XL)
 extern const GFXfont *NumXL;   // 128 px digits only
+extern const BigFont *HugeS;   // 150 px digits only
+extern const BigFont *HugeM;   // 176 px digits only (one or two tiles on a page)
+extern const BigFont *HugeL;   // 240 px digits only
 }  // namespace font
+
+// A value font: a GFX font or a BigFont (past GFX's ~128 px limit).
+struct VFont {
+  const GFXfont *g = nullptr;
+  const BigFont *b = nullptr;
+  VFont() = default;
+  VFont(decltype(nullptr)) {}
+  VFont(const GFXfont *f) : g(f) {}
+  VFont(const BigFont *f) : b(f) {}
+  bool ok() const { return g || b; }
+};
+int ascent(const VFont &f);
+int textWidth(const VFont &f, const char *utf8);
 
 // UTF-8 → font codes. Returns length written (out is always terminated).
 size_t toGlyphs(const char *utf8, char *out, size_t n);
@@ -31,6 +51,7 @@ int textWidth(const GFXfont *f, const char *utf8);
 enum Align { Left, Center, Right };
 // Draws UTF-8 text with its baseline at y. Returns the drawn width.
 int drawText(Adafruit_GFX &d, const GFXfont *f, int x, int y, const char *utf8, uint16_t color, Align a = Left);
+int drawText(Adafruit_GFX &d, const VFont &f, int x, int y, const char *utf8, uint16_t color, Align a = Left);
 // Like drawText, but shortens with "…"-style ".." to fit maxW.
 int drawTextFit(Adafruit_GFX &d, const GFXfont *f, int x, int y, const char *utf8, uint16_t color, int maxW,
                 Align a = Left);
