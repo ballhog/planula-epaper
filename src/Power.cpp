@@ -104,11 +104,6 @@ void restoreState() {
   pendingPage = rtc.page;  // applied in loop(), once the page count is known
 }
 
-void markMoved(panel::Page &p) {
-  if (!sleepy() || rtc.magic != kMagic || !rtc.drawnAt) return;
-  rules::markMoved(p, (uint8_t)app::page(), rtc.drawn);
-}
-
 void remember(const panel::Page &p) {
   rules::remember(p, (uint8_t)app::page(), rtc.drawn);
   rtc.drawnAt = time(nullptr);
@@ -165,6 +160,12 @@ bool busy() {
 }  // namespace
 
 bool sleepy() { return settings::get().power != "live"; }
+
+void markMoved(panel::Page &p) {
+  if (!sleepy() || rtc.magic != kMagic || !rtc.drawnAt) return;
+  rules::markMoved(p, (uint8_t)app::page(), rtc.drawn);
+}
+
 bool quiet() { return sleepy() && quietCycle; }
 
 void touch() {
