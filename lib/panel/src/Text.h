@@ -14,6 +14,7 @@ extern const GFXfont *Head;    // 28 px  header, banner
 extern const GFXfont *NumS;    // 34 px  small values (full ASCII)
 extern const GFXfont *NumM;    // 54 px  digits only
 extern const GFXfont *NumL;    // 84 px  digits only
+extern const GFXfont *NumLL;   // 104 px digits only (Numbers view: between L and XL)
 extern const GFXfont *NumXL;   // 128 px digits only
 }  // namespace font
 

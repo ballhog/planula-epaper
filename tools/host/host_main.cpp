@@ -211,6 +211,14 @@ static void samples() {
     shot(cv, "19-takeover-two", [&](Adafruit_GFX &d) { render(d, q2, c); });
   }
   {
+    // Numbers view on a 3x2 page without alarms (like Joe's Tank page).
+    Page qn = q;
+    for (int k = 0; k < qn.n; k++)
+      if (qn.g[k].status == Status::Alarm) qn.g[k].status = Status::Warn;
+    qn.view = View::Numbers;
+    shot(cv, "21-chem-3x2-numbers", [&](Adafruit_GFX &d) { render(d, qn, c); });
+  }
+  {
     Page qg = q;
     qg.view = View::Graphs;
     qg.g[1].nspark = 0;  // one tile with no trend yet

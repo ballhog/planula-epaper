@@ -20,13 +20,23 @@ panel::BandCanvas *cv = nullptr;
 GxEPD2_EPD *epd = nullptr;
 Scene last;
 int16_t bandY = -1;  // band currently in cv, -1 = none / stale
+// Which scene the band in cv was drawn from: a band already holding the current
+// scene isn't drawn again. On the reTerminal (one band = the whole frame) that
+// makes a screen change one render instead of three (hash, write, write again).
+uint32_t sceneGen = 0, bandGen = 0;
+uint32_t renders = 0, renderUs = 0;  // since the last show(), for the log
 uint32_t lastHash = 0, partials = 0, nRefresh = 0, nFull = 0, lastFullMs = 0;
 bool first = true, fullAsked = false;
 
 void drawBand(const Scene &scene, int16_t y0) {
+  if (bandY == y0 && bandGen == sceneGen) return;  // already there
+  uint32_t t0 = micros();
   cv->setBand(y0);
   if (scene) scene(*cv);
   bandY = y0;
+  bandGen = sceneGen;
+  renders++;
+  renderUs += micros() - t0;
 }
 
 uint32_t hashScene(const Scene &scene) {
@@ -109,6 +119,8 @@ void begin(const String &driver) {
 
 bool show(const Scene &scene, bool forceFull) {
   last = scene;
+  sceneGen++;
+  renders = renderUs = 0;
   uint32_t h = hashScene(last);
   bool changed = h != lastHash || first;
   const Settings &s = settings::get();
@@ -119,7 +131,10 @@ bool show(const Scene &scene, bool forceFull) {
     // unless it's overdue by a lot (ghosting builds slowly on a static page).
     if (millis() - lastFullMs < 4UL * 3600000UL) return false;
   }
+  uint32_t t0 = millis();
   push(full);
+  Serial.printf("[display] %s refresh: %u render(s) %u ms, panel %u ms\n", full ? "full" : "partial",
+                (unsigned)renders, (unsigned)(renderUs / 1000), (unsigned)(millis() - t0));
   first = false;
   fullAsked = false;
   lastHash = h;

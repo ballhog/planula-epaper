@@ -28,6 +28,7 @@ FONTS = [
     ('NumS',   'Inter-Bold.otf',     34, 'full'),
     ('NumM',   'Inter-Bold.otf',     54, 'num'),
     ('NumL',   'Inter-Bold.otf',     84, 'num'),
+    ('NumLL',  'Inter-Bold.otf',    104, 'num'),
     ('NumXL',  'Inter-Bold.otf',    128, 'num'),
 ]
 

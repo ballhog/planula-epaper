@@ -6,6 +6,7 @@
 #include "fonts/InterHead.h"
 #include "fonts/InterLabel.h"
 #include "fonts/InterNumL.h"
+#include "fonts/InterNumLL.h"
 #include "fonts/InterNumM.h"
 #include "fonts/InterNumS.h"
 #include "fonts/InterNumXL.h"
@@ -25,6 +26,7 @@ const GFXfont *Head = &InterHead;
 const GFXfont *NumS = &InterNumS;
 const GFXfont *NumM = &InterNumM;
 const GFXfont *NumL = &InterNumL;
+const GFXfont *NumLL = &InterNumLL;
 const GFXfont *NumXL = &InterNumXL;
 }  // namespace font
 

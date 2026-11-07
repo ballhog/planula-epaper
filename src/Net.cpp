@@ -4,6 +4,7 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_sleep.h>
 #include <time.h>
 
 #include "Settings.h"
@@ -23,9 +24,24 @@ uint32_t tryStart = 0, lastAttempt = 0, bootMs = 0, apSince = 0;
 String reason, apSsid, joinedSsid, lastTz;
 bool wantReconnect = true;
 
+// The access point last joined, kept through deep sleep: after a battery wake
+// the panel goes straight to it (no 2-3 s scan). Normal join if that fails.
+struct FastJoin {
+  uint32_t magic;
+  char ssid[33];
+  uint8_t bssid[6];
+  int32_t channel;
+};
+constexpr uint32_t kFastMagic = 0x46534A31;  // "FSJ1"
+RTC_DATA_ATTR FastJoin fast;
+bool fastTry = false;
+uint32_t fastAt = 0;
+
 String chooseSsid() {
   const Settings &s = settings::get();
   if (s.wifi.empty()) return "";
+  // One saved network: nothing to choose, skip the scan (~2 s at every boot).
+  if (s.wifi.size() == 1) return s.wifi[0].ssid;
   int n = WiFi.scanNetworks(false, false);
   String best;
   int bestRssi = -1000;
@@ -59,9 +75,17 @@ void stopAp() {
 
 void startServices() {
   const Settings &s = settings::get();
-  Serial.printf("[wifi] joined %s, IP %s, gateway %s, DNS %s, %d dBm\n", WiFi.SSID().c_str(),
+  Serial.printf("[wifi] joined %s, IP %s, gateway %s, DNS %s, %d dBm, %u ms after boot%s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
-                WiFi.dnsIP(0).toString().c_str(), WiFi.RSSI());
+                WiFi.dnsIP(0).toString().c_str(), WiFi.RSSI(), (unsigned)millis(), fastTry ? " (fast rejoin)" : "");
+  fastTry = false;
+  // Remember the access point for the next wake.
+  if (uint8_t *b = WiFi.BSSID()) {
+    fast.magic = kFastMagic;
+    strlcpy(fast.ssid, WiFi.SSID().c_str(), sizeof fast.ssid);
+    memcpy(fast.bssid, b, 6);
+    fast.channel = WiFi.channel();
+  }
   if (!mdnsOn && MDNS.begin(s.name.c_str())) {
     MDNS.addService("http", "tcp", 80);
     MDNS.addService("calyx", "tcp", 80);
@@ -106,6 +130,18 @@ void begin() {
   if (settings::get().wifi.empty()) {
     reason = "No Wi-Fi saved yet.";
     startAp();
+  } else if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED && fast.magic == kFastMagic) {
+    // Woken from deep sleep: straight to the access point from last time.
+    for (auto &w : settings::get().wifi)
+      if (w.ssid == fast.ssid) {
+        WiFi.begin(w.ssid.c_str(), w.pass.c_str(), fast.channel, fast.bssid, true);
+        joinedSsid = w.ssid;
+        tryStart = lastAttempt = fastAt = millis();
+        fastTry = true;
+        wantReconnect = false;
+        return;
+      }
+    attempt();
   } else {
     attempt();
   }
@@ -144,6 +180,14 @@ void loop() {
     }
     return;
   }
+  if (fastTry && millis() - fastAt > 6000) {  // the remembered access point didn't answer
+    Serial.println("[wifi] fast rejoin failed, scanning");
+    fastTry = false;
+    fast.magic = 0;
+    WiFi.disconnect(false, false);
+    wantReconnect = true;
+  }
+  if (fastTry) return;
   if (wantReconnect || millis() - lastAttempt > 30000) {
     wantReconnect = false;
     lastAttempt = millis();

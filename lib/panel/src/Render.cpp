@@ -69,7 +69,7 @@ int pill(Adafruit_GFX &d, int xRight, int yTop, const char *text, uint16_t fg, u
 }
 
 const GFXfont *valueFontFor(int w, int h, const char *val, int unitW) {
-  const GFXfont *cands[] = {font::NumXL, font::NumL, font::NumM, font::NumS};
+  const GFXfont *cands[] = {font::NumXL, font::NumLL, font::NumL, font::NumM, font::NumS};
   for (const GFXfont *f : cands) {
     int asc = ascent(f);
     if (asc > h) continue;
@@ -211,8 +211,27 @@ TileGeom geom(const Gauge &g, int w, int h, View view) {
   return t;
 }
 
+// Numbers view: the value as big as the tile allows, centred, with the unit
+// beside it when that fits and under it otherwise. Values of 100 and up drop
+// their decimals here (397, not 397.0).
+static void numbersText(const Gauge &g, char *val, size_t n) {
+  Gauge t = g;
+  if (t.has && fabsf(t.value) >= 100.0f) t.dec = 0;
+  formatValue(t, val, n);
+}
+
+static const GFXfont *numbersFont(const Gauge &g, int w, int h, const TileGeom &t) {
+  char val[16];
+  numbersText(g, val, sizeof val);
+  // The unit sits in the lower-right corner; its line is always reserved
+  // (unit or not) so values line up across a row.
+  int areaW = w - 2 * t.pad, areaH = h - t.ly - t.pad - 6 - ascent(font::Label) - 8;
+  return valueFontFor(areaW, areaH, val, 0);
+}
+
 const GFXfont *tileValueFont(const Gauge &g, int w, int h, View view) {
   TileGeom t = geom(g, w, h, view);
+  if (view == View::Numbers) return numbersFont(g, w, h, t);
   char val[16];
   formatValue(g, val, sizeof val);
   return valueFontFor(w - 2 * t.pad, t.valueMaxH, val, t.unitW);
@@ -278,6 +297,19 @@ void tile(Adafruit_GFX &d, const Gauge &g, int x, int y, int w, int h, const GFX
   const GFXfont *uf = t.uf;
   bool wantSpark = t.wantSpark;
   const GFXfont *vf = vfShared ? vfShared : tileValueFont(g, w, h, view);
+  if (view == View::Numbers) {
+    // The value centred between the label row and the unit line; the unit in
+    // the lower-right corner, a size up from the other views. The unit line
+    // is reserved even without a unit so values in a row share a baseline.
+    numbersText(g, val, sizeof val);
+    const GFXfont *nuf = font::Label;
+    int va = ascent(vf), ua = ascent(nuf);
+    int top = ly + 6, bottom = y + h - pad - ua - 8;
+    int base = top + (bottom - top - va) / 2 + va;
+    drawText(d, vf, x + w / 2, base, val, fg, Center);
+    if (g.unit[0]) drawText(d, nuf, x + w - pad, y + h - pad, g.unit, fg, Right);
+    return;
+  }
   int va = ascent(vf);
   int vy = ly + 14 + va;
   if (!wantSpark) vy = y + h / 2 + (ly - y) / 2 + va / 2 - 4;
