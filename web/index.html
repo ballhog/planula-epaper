@@ -187,6 +187,7 @@ async function refresh(){
   ['Coeno',pill(S.coeno.connected,S.coeno.text)],['Apex',pill(S.apex.ok,S.apex.text)],['Hydros',pill(S.hydros.ok,S.hydros.text)],
   ['Page',`${S.page+1} of ${S.pages}`],['Up',age(S.uptime_s)],['Memory',`${Math.round(S.heap/1024)} kB free (low ${Math.round(S.heap_min/1024)})`],
   ['Refreshes',`${S.refreshes} (${S.full_refreshes} full)`]];
+ if(S.board_text)kv.splice(5,0,['Panel',esc(S.board_text)]);
  $('kv').innerHTML=kv.map(([k,v])=>`<div>${k}</div><div>${v}</div>`).join('');
  const al=S.alarms||[];$('alarm').classList.toggle('on',al.length>0&&!S.acked);
  $('alarmText').textContent=al.map(a=>a.text).join(' · ');

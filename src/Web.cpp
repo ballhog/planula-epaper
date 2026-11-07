@@ -3,6 +3,7 @@
 #include <functional>
 
 #include "Worker.h"
+#include "Board.h"
 
 #include <ArduinoJson.h>
 #include <WebServer.h>
@@ -131,6 +132,8 @@ void handleStatus() {
   JsonObject h = d["hydros"].to<JsonObject>();
   h["ok"] = hydros::ok();
   h["text"] = hydros::status();
+  d["board_text"] = board::status();  // room sensor + battery (reTerminal)
+  d["battery_pct"] = board::batteryPct();
   d["page"] = app::page();
   d["pages"] = app::pages();
   d["alarms"] = serialized(app::alarmsJson());

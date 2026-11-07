@@ -32,6 +32,7 @@
 #include "Settings.h"
 #include "Web.h"
 #include "Worker.h"
+#include "Board.h"
 #include "ota.h"
 
 #ifndef FW_BUILD
@@ -210,6 +211,7 @@ void fillChrome(panel::Chrome &c) {
   }
   if (net::online()) right = "Wi-Fi " + String(net::rssi()) + " dBm";
   else right = "Wi-Fi offline";
+  if (board::batteryPct() >= 0) right += " · battery " + String(board::batteryPct()) + "%";
   if (availBuild > 0 && coenoLinked()) right += " · update ready, hold 3 s";
   PANEL_COPY(c.footerLeft, left.c_str());
   PANEL_COPY(c.footerRight, right.c_str());
@@ -895,6 +897,7 @@ void setup() {
   display::begin(settings::get().panelDriver);
   if (settings::get().mode == "direct" && settings::get().hydrosOn) hydros::reserve();
   worker::begin();
+  board::begin();
   Serial.printf("[mem] after start: free %u, largest block %u\n", (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
   net::begin();
@@ -917,6 +920,7 @@ void loop() {
   button();
 #endif
   coeno::loop();
+  board::loop();
   apex::loop();
   updates();  // before Hydros: the boot-time check runs before its session opens
   hydros::loop();
