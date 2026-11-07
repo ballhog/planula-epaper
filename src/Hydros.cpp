@@ -354,6 +354,13 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     if (o) {
       int left = jl - (int)(o - js);
       Serial.printf("[hydros] outputs section: %.*s\n", left < 700 ? left : 700, o);
+      // A dosing head in full (for the dose amount, if the status has one).
+      for (int i = (int)(o - js); i + 5 < jl; i++)
+        if (!memcmp(js + i, "\"rpm\"", 5)) {
+          int a = i - 120 < 0 ? 0 : i - 120;
+          Serial.printf("[hydros] a dosing head: %.*s\n", jl - a < 600 ? jl - a : 600, js + a);
+          break;
+        }
     } else {
       Serial.println("[hydros] no Output section found in the status");
     }
@@ -390,10 +397,14 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
     float v = numberOf(o["valueState"]);
     float dr = numberOf(o["drainvalueState"]), fi = numberOf(o["fillvalueState"]);
     if (isnan(v) && isnan(dr) && isnan(fi)) continue;
-    bool on = (!isnan(v) && v > 0) || (!isnan(dr) && dr > 0) || (!isnan(fi) && fi > 0);
-    const char *type = !o["rpm"].isNull() ? "doser" : !isnan(dr) || !isnan(fi) ? "wc" : "output";
+    bool doser = !o["rpm"].isNull(), wc = !isnan(dr) || !isnan(fi);
+    // valueState 0..10000 = 0-100 %; the water-change pair counts as on/off.
+    uint8_t level = 0;
+    if (wc) level = ((!isnan(dr) && dr > 0) || (!isnan(fi) && fi > 0) || (!isnan(v) && v > 0)) ? 100 : 0;
+    else if (!isnan(v)) level = (uint8_t)constrain((int)lroundf(v / 100.0f), v > 0 ? 1 : 0, 100);
+    if (doser && level) level = 100;  // a dosing head runs at speed: on/off
     String key = "hydros:" + thing + "/" + kv.key().c_str();
-    outlets::update(key.c_str(), "Hydros", type, on, o["override"] | false, false);
+    outlets::update(key.c_str(), "Hydros", doser ? "doser" : wc ? "wc" : "output", level, o["override"] | false, false);
   }
 }
 

@@ -203,7 +203,7 @@ String applyJson(JsonObjectConst o) {
     auto act = [](JsonVariantConst v, String &dst) {
       if (!v.is<const char *>()) return;
       String a = v.as<const char *>();
-      if (a == "prev" || a == "next" || a == "view" || a == "refresh" || a == "info" || a == "none") dst = a;
+      if (a == "prev" || a == "next" || a == "view" || a == "refresh" || a == "info" || a == "schedule" || a == "none") dst = a;
     };
     act(k["left"], s.keyLeft);
     act(k["middle"], s.keyMid);

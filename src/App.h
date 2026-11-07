@@ -11,6 +11,7 @@ int pages();
 void gotoPage(int n);
 void nextPage();
 void prevPage();
+void toggleSchedule();  // to the Outlets / Schedule page and back
 // Tiles: number + trend -> graphs -> numbers only -> ... (saved).
 void cycleView();
 void redraw(bool full);  // redraw soon (full = flashing refresh)

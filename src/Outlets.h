@@ -23,17 +23,21 @@ struct Out {
   bool on;
   bool manual;      // forced on/off by hand (Apex ON/OFF, not AON/AOF)
   bool hidden;      // virtual / alert outputs: not offered by default
+  uint8_t level;    // 0-100 % (on/off outputs: 0 or 100)
+  bool variable;    // has reported a level between 0 and 100 (lights, pumps)
   uint32_t atMs;    // last report
 };
 
-void update(const char *key, const char *source, const char *type, bool on, bool manual, bool hidden);
+// level: 0-100 % (pass 100 / 0 for plain on/off outputs).
+void update(const char *key, const char *source, const char *type, uint8_t level, bool manual, bool hidden);
 int count();
 bool at(int i, Out &out);
 bool get(const String &key, Out &out);
 const char *nameOf(const char *key);  // the part after "source:"
 
-// The Outlets page as timeline lanes: 12 h up to now (empty page if nothing
-// picked). Uses settings' outlet picks for order and labels.
+// The Outlets page as timeline lanes, 12 h up to now. Lane per output kind:
+// dosing heads = a mark per dose, dimmable outputs = their level (%),
+// everything else on/off bars. Uses settings' picks for order and labels.
 bool buildPage(panel::Page &p);
 
 }  // namespace outlets

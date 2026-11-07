@@ -290,7 +290,8 @@ void handleOutlets() {
     j["source"] = o.source;
     j["type"] = o.type;
     j["hidden"] = o.hidden;
-    j["state"] = String(o.on ? "on" : "off") + (o.manual ? " (by hand)" : " (auto)");
+    j["state"] = String(o.on ? (o.variable ? String(o.level) + " %" : String("on")) : String("off")) +
+                 (o.manual ? " (by hand)" : " (auto)");
   }
   sendJson(200, d);
 }

@@ -152,6 +152,33 @@ static void samples() {
         {"Kalk stirrer", {{-720, 0}, {-95, 1}}, "by hand"},
         {"Lights", {{-720, 0}, {-660, 1}, {-120, 0}}, ""},
     };
+    // Dimmable output (Hydros valueState) as a level lane, and a dosing head.
+    {
+      Gauge &g = o.g[o.n++];
+      PANEL_COPY(g.label, "1R Blues");
+      PANEL_COPY(g.unit, "%");
+      g.dec = 0;
+      g.lane = Lane::Step;
+      g.status = Status::Ok;
+      g.has = true;
+      int pts[][2] = {{-720, 0}, {-640, 20}, {-620, 45}, {-600, 70}, {-580, 85}, {-180, 60}, {-160, 30}, {-140, 0}};
+      for (auto &q : pts) {
+        g.t[g.nspark] = q[0];
+        g.spark[g.nspark++] = q[1];
+      }
+      g.value = 0;
+    }
+    {
+      Gauge &g = o.g[o.n++];
+      PANEL_COPY(g.label, "Alk (X10 D1)");
+      g.lane = Lane::Events;
+      g.status = Status::Ok;
+      g.has = true;
+      for (int t = -690; t < 0; t += 60) {
+        g.t[g.nspark] = t;
+        g.spark[g.nspark++] = NAN;
+      }
+    }
     for (auto &l : ls) {
       Gauge &g = o.g[o.n++];
       PANEL_COPY(g.label, l.name);

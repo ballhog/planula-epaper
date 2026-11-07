@@ -5,6 +5,8 @@
 
 #include "Settings.h"
 
+#include <math.h>
+
 namespace outlets {
 
 namespace {
@@ -21,12 +23,14 @@ struct Lock {
 Out items[kMax];
 int n = 0;
 
-// History of the picked outputs: each entry is millis() of a change, with the
-// new state in bit 0 (the time is rounded to an even ms for that).
+// History of the picked outputs: millis() of each change and the new level.
+// Dimmable outputs ramp in small steps; only moves of 5 % or more (or to/from
+// off) are kept, so a sunrise doesn't push the whole day out of the buffer.
 struct Hist {
   char key[44];
   uint8_t len;
-  uint32_t ev[kHist];
+  uint32_t at[kHist];
+  uint8_t v[kHist];
 };
 Hist hist[kPicked];
 
@@ -50,14 +54,20 @@ Hist *histFor(const char *key, bool create) {
   return nullptr;
 }
 
-void record(Hist &h, bool on) {
-  uint32_t e = (millis() & ~1u) | (on ? 1u : 0u);
-  if (h.len && (h.ev[h.len - 1] & 1u) == (on ? 1u : 0u)) return;  // no change
+void record(Hist &h, uint8_t v) {
+  if (h.len) {
+    uint8_t last = h.v[h.len - 1];
+    bool onOff = (last == 0) != (v == 0);
+    if (!onOff && abs((int)v - (int)last) < 5) return;
+  }
   if (h.len >= kHist) {
-    memmove(h.ev, h.ev + 1, sizeof(uint32_t) * (kHist - 1));
+    memmove(h.at, h.at + 1, sizeof(h.at[0]) * (kHist - 1));
+    memmove(h.v, h.v + 1, kHist - 1);
     h.len = kHist - 1;
   }
-  h.ev[h.len++] = e;
+  h.at[h.len] = millis();
+  h.v[h.len] = v;
+  h.len++;
 }
 
 }  // namespace
@@ -73,7 +83,8 @@ const char *nameOf(const char *key) {
   return c;
 }
 
-void update(const char *key, const char *source, const char *type, bool on, bool manual, bool hidden) {
+void update(const char *key, const char *source, const char *type, uint8_t level, bool manual, bool hidden) {
+  bool on = level > 0;
   Lock l;
   Out *o = nullptr;
   for (int i = 0; i < n; i++)
@@ -89,9 +100,11 @@ void update(const char *key, const char *source, const char *type, bool on, bool
   o->on = on;
   o->manual = manual;
   o->hidden = hidden;
+  o->level = level > 100 ? 100 : level;
+  if (level > 0 && level < 100) o->variable = true;
   o->atMs = millis();
   if (picked(key))
-    if (Hist *h = histFor(key, true)) record(*h, on);
+    if (Hist *h = histFor(key, true)) record(*h, o->level);
 }
 
 int count() {
@@ -146,25 +159,43 @@ bool buildPage(panel::Page &p) {
       g.status = panel::Status::Missing;
       continue;
     }
+    bool doser = !strcmp(o->type, "doser");
+    g.lane = doser ? panel::Lane::Events : o->variable ? panel::Lane::Step : panel::Lane::OnOff;
     g.has = true;
-    g.value = o->on ? 1 : 0;
+    if (o->variable) {
+      g.value = o->level;
+      PANEL_COPY(g.unit, "%");
+      g.dec = 0;
+    } else {
+      g.value = o->on ? 1 : 0;
+    }
     if (o->manual) PANEL_COPY(g.note, "by hand");
     PANEL_COPY(g.src, o->source);
     Hist *h = histFor(o->key, false);
     if (!h) continue;
-    // Points: the state at the window start (the last change before it), then
-    // each change inside it.
+    auto ago = [&](int k) { return (int32_t)(ms - h->at[k]) / 60000; };
+    if (doser) {
+      // A mark where each dose started (amounts aren't in the status).
+      for (int k = 0; k < h->len && g.nspark < panel::kSparkLen; k++) {
+        if (h->v[k] == 0 || (k > 0 && h->v[k - 1] > 0)) continue;
+        if (ago(k) > -p.from) continue;
+        g.t[g.nspark] = (int16_t)-ago(k);
+        g.spark[g.nspark++] = NAN;
+      }
+      continue;
+    }
+    // The state at the window start (the last change before it), then each
+    // change inside it.
     int first = h->len;
     for (int k = 0; k < h->len; k++)
-      if ((int32_t)(ms - (h->ev[k] & ~1u)) / 60000 <= -p.from) {
+      if (ago(k) <= -p.from) {
         first = k;
         break;
       }
     int start = first > 0 ? first - 1 : 0;
     for (int k = start; k < h->len && g.nspark < panel::kSparkLen; k++) {
-      int32_t ago = (int32_t)(ms - (h->ev[k] & ~1u)) / 60000;
-      g.t[g.nspark] = (int16_t)(ago > -p.from ? p.from : -ago);
-      g.spark[g.nspark] = (h->ev[k] & 1u) ? 1 : 0;
+      g.t[g.nspark] = (int16_t)(ago(k) > -p.from ? p.from : -ago(k));
+      g.spark[g.nspark] = o->variable ? h->v[k] : (h->v[k] ? 1 : 0);
       g.nspark++;
     }
   }

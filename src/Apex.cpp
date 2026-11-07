@@ -153,7 +153,7 @@ static String poll(const String &hostIn, const String &user, const String &pass,
       bool manual = st == "ON" || st == "OFF";
       bool on = st == "ON" || st == "AON" || st == "TBL";
       bool hidden = type == "virtual" || type == "alert" || type == "serial";
-      outlets::update(("apex:" + name).c_str(), "Apex", type.c_str(), on, manual, hidden);
+      outlets::update(("apex:" + name).c_str(), "Apex", type.c_str(), on ? 100 : 0, manual, hidden);
     }
   }
   return "";
