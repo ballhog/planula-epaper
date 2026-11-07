@@ -399,6 +399,8 @@ void header(Adafruit_GFX &d, const Page &p, const Chrome &c) {
   d.fillRect(0, kHeaderH - 2, kW, 2, INK);
 }
 
+static int footerIcons(Adafruit_GFX &d, const Chrome &c, int xr, int base, uint16_t fg);
+
 void footer(Adafruit_GFX &d, const Chrome &c) {
   int y = kH - kFooterH;
   uint16_t fg = INK;
@@ -408,9 +410,55 @@ void footer(Adafruit_GFX &d, const Chrome &c) {
   } else {
     d.fillRect(0, y, kW, 2, INK);
   }
+  int ix = footerIcons(d, c, kW - 14, y + 22, fg);
   int rw = c.footerRight[0] ? textWidth(font::Small, c.footerRight) : 0;
-  drawTextFit(d, font::Small, 14, y + 22, c.footerLeft, fg, kW - rw - 50);
-  if (rw) drawText(d, font::Small, kW - 14, y + 22, c.footerRight, fg, Right);
+  if (rw) drawText(d, font::Small, ix - 4, y + 22, c.footerRight, fg, Right);
+  drawTextFit(d, font::Small, 14, y + 22, c.footerLeft, fg, ix - (rw ? rw + 16 : 0) - 50);
+}
+
+// Footer icons, right-aligned at xr (their right edge), baseline y. Returns
+// the x where they start.
+static int footerIcons(Adafruit_GFX &d, const Chrome &c, int xr, int base, uint16_t fg) {
+  int x = xr;
+  if (c.battery >= 0) {
+    char pct[8];
+    snprintf(pct, sizeof pct, "%d%%", c.battery);
+    x -= drawText(d, font::Small, x, base, pct, fg, Right) + 6;
+    // body 26 x 13 with a nub, fill by charge
+    int bw = 26, bh = 13, by = base - 13;
+    x -= 3;
+    d.fillRect(x, by + 4, 3, 5, fg);  // nub
+    x -= bw;
+    d.drawRect(x, by, bw, bh, fg);
+    d.drawRect(x + 1, by + 1, bw - 2, bh - 2, fg);
+    int fw = (bw - 6) * (c.battery > 100 ? 100 : c.battery) / 100;
+    if (fw > 0) d.fillRect(x + 3, by + 3, fw, bh - 6, fg);
+    x -= 14;
+  }
+  if (c.wifi >= 0) {
+    // The usual fan: a dot and three 90° arcs. Arcs the signal reaches are
+    // solid and 2 px; the rest dotted, so "2 of 4" reads at a glance.
+    int cx = x - 13, cy = base - 1;
+    d.fillCircle(cx, cy - 1, 2, fg);
+    for (int k = 1; k <= 3; k++) {
+      int r = 4 + k * 5;
+      bool strong = c.wifi >= k + 1;
+      int steps = r * 3;
+      for (int i = 0; i <= steps; i++) {
+        if (!strong && (i % 3)) continue;
+        float a = (45.0f + 90.0f * i / steps) * 3.14159265f / 180.0f;
+        int px = cx + (int)lroundf(cosf(a) * r), py = cy - (int)lroundf(sinf(a) * r);
+        d.drawPixel(px, py, fg);
+        if (strong) {
+          d.drawPixel(cx + (int)lroundf(cosf(a) * (r - 1)), cy - (int)lroundf(sinf(a) * (r - 1)), fg);
+        }
+      }
+    }
+    if (c.wifi == 0)  // offline: struck through
+      for (int t = 0; t < 2; t++) d.drawLine(cx - 12, cy - 17 + t, cx + 12, cy + 1 + t, fg);
+    x = cx - 22;
+  }
+  return x;
 }
 
 // Gauge pages: title and page dots on the left of the footer, then the
@@ -443,10 +491,12 @@ void pageFooter(Adafruit_GFX &d, const Page &p, const Chrome &c) {
   } else {
     snprintf(left, sizeof left, "%s", c.footerLeft);
   }
+  int ix = footerIcons(d, c, kW - 14, base, fg);
   int rw = c.footerRight[0] ? textWidth(font::Small, c.footerRight) : 0;
+  if (rw) drawText(d, font::Small, ix - 4, base, c.footerRight, fg, Right);
+  int rightEdge = ix - (rw ? rw + 16 : 0);
   drawText(d, font::Small, x, base, "·", fg);
-  drawTextFit(d, font::Small, x + 14, base, left, fg, kW - x - 14 - rw - 40);
-  if (rw) drawText(d, font::Small, kW - 14, base, c.footerRight, fg, Right);
+  drawTextFit(d, font::Small, x + 14, base, left, fg, rightEdge - x - 30);
 }
 
 // Alarm takeover: one or two gauges in alarm get the left half of the page,

@@ -214,9 +214,14 @@ void fillChrome(panel::Chrome &c) {
     alert = (s.apexOn && !apex::ok() && (int32_t)(millis() - apex::lastOkMs()) > (int32_t)(s.stale_s * 1000UL)) ||
             (s.hydrosOn && !hydros::ok() && millis() > 180000UL);
   }
-  if (net::online()) right = "Wi-Fi " + String(net::rssi()) + " dBm";
-  else right = "Wi-Fi offline";
-  if (board::batteryPct() >= 0) right += " · battery " + String(board::batteryPct()) + "%";
+  // Wi-Fi and battery are drawn as icons (Chrome.wifi / .battery).
+  if (net::online()) {
+    int r = net::rssi();
+    c.wifi = r > -55 ? 4 : r > -65 ? 3 : r > -75 ? 2 : 1;
+  } else {
+    c.wifi = 0;
+  }
+  c.battery = board::batteryPct();
   if (power::sleepy()) {
     // The screen is a snapshot: say when it was taken and when the next one is.
     String at = clockText(), nx = power::nextWakeText();
@@ -224,7 +229,7 @@ void fillChrome(panel::Chrome &c) {
     if (nx.length()) head += " · next " + nx;
     left = head + " · " + left;
   }
-  if (availBuild > 0 && coenoLinked()) right += " · update ready, hold 3 s";
+  if (availBuild > 0 && coenoLinked()) right = "update ready, hold 3 s";
   PANEL_COPY(c.footerLeft, left.c_str());
   PANEL_COPY(c.footerRight, right.c_str());
   c.footerAlert = alert;

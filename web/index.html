@@ -289,12 +289,13 @@ function drawOutlets(){const all=$('olHidden').checked;const picked=k=>OL.findIn
   return `<div class="row" style="align-items:center"><label style="flex:2"><input type="checkbox" ${i>=0?'checked':''} onchange="pickOutlet('${esc(o.key)}',this.checked)"> ${esc(o.name)} <span class="hint">${esc(o.source||'')} ${esc(o.type||'')} · ${esc(o.state||'')}${i>=0?' · lane '+(i+1):''}</span></label>
   <input style="flex:1" placeholder="label" value="${esc(lab)}" ${i>=0?'':'disabled'} oninput="labelOutlet('${esc(o.key)}',this.value)"></div>`}).join('')
   :'<p class="hint">No outlets yet: they show up after the first Apex or Hydros reading.</p>'}
-function pickOutlet(k,on){const i=OL.findIndex(o=>o.key===k);if(on&&i<0){if(OL.length>=8){alert('Up to 8 outlets');drawOutlets();return}OL.push({key:k,label:''})}
+function pickOutlet(k,on){setTimeout(drawPages,0);const i=OL.findIndex(o=>o.key===k);if(on&&i<0){if(OL.length>=8){alert('Up to 8 outlets');drawOutlets();return}OL.push({key:k,label:''})}
  if(!on&&i>=0)OL.splice(i,1);drawOutlets()}
 function labelOutlet(k,v){const o=OL.find(o=>o.key===k);if(o)o.label=v}
 function drawPages(){$('pages').innerHTML=P.map((p,i)=>`<div class="row" style="align-items:end"><div><label>Page ${i+1} title</label><input value="${esc(p.title)}" oninput="P[${i}].title=this.value"></div>
  <div><label>Layout</label><select onchange="P[${i}].layout=this.value">${['auto','single','2x2','3x2','list'].map(l=>`<option ${p.layout===l?'selected':''}>${l}</option>`).join('')}</select></div>
- <div>${P.length>1?`<button class="btn mini bad" onclick="P.splice(${i},1);G.forEach(g=>{if(g.page>${i})g.page--;else if(g.page==${i})g.page=0});drawPages();drawGauges()">Remove</button>`:''}</div></div>`).join('')}
+ <div>${P.length>1?`<button class="btn mini bad" onclick="P.splice(${i},1);G.forEach(g=>{if(g.page>${i})g.page--;else if(g.page==${i})g.page=0});drawPages();drawGauges()">Remove</button>`:''}</div></div>`).join('')
+ +((typeof OL!=='undefined'&&OL.length)?`<div class="row" style="align-items:end"><div><label>Page ${P.length+1}</label><input value="Outlets" disabled></div><div><label>Layout</label><input value="timeline" disabled></div><div><span class="hint">from the Outlets page card below; untick all outlets to drop it</span></div></div>`:'')}
 function addPage(){if(P.length>=6)return toast('6 pages at most');P.push({title:'Page '+(P.length+1),layout:'auto'});drawPages();drawGauges()}
 function readingOpts(sel){const groups={};for(const r of R){(groups[r.source+' · '+r.device]??=[]).push(r)}
  let h=`<option value="">— pick a reading —</option>`;let found=!sel;

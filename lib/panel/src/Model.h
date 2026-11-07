@@ -95,6 +95,8 @@ struct Chrome {
   char footerLeft[72] = "";  // "Coeno · updated 40 s ago"
   char footerRight[48] = ""; // "Wi-Fi -58 · b12"
   bool footerAlert = false;  // stale/offline: footer drawn inverted
+  int8_t wifi = -1;          // icon: -1 none, 0 offline (struck through), 1-4 bars
+  int8_t battery = -1;       // icon + "96%": -1 none
   char alarm[56] = "";       // banner text, "" = none
   uint8_t alarmCount = 0;
   bool alarmAcked = false;   // acknowledged: banner shown hollow instead of solid

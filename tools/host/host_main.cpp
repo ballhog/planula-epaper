@@ -78,7 +78,9 @@ static void chromeFor(Chrome &c, int page, int pages) {
   c.page = page;
   c.pages = pages;
   PANEL_COPY(c.footerLeft, "Coeno · page updated 40 s ago");
-  PANEL_COPY(c.footerRight, "Wi-Fi -58 dBm · build 12");
+  PANEL_COPY(c.footerRight, "build 12");
+  c.wifi = 3;
+  c.battery = 96;
 }
 
 static void samples() {
@@ -313,7 +315,7 @@ static void samples() {
     Chrome sc;
     PANEL_COPY(sc.clock, "2:20");
     PANEL_COPY(sc.footerLeft, "Coeno · 10.0.0.228");
-    PANEL_COPY(sc.footerRight, "Wi-Fi -58 dBm · update ready");
+    PANEL_COPY(sc.footerRight, "update ready");
     si.state = SystemInfo::Available;
     si.hint = "Press the button to update";
     shot(cv, "10-system-update-available", [&](Adafruit_GFX &d) { renderSystem(d, si, sc); });
@@ -324,7 +326,7 @@ static void samples() {
     si.availBuild = 0;
     si.detail = "up to date (build 12, Coeno)";
     si.hint = "Press: close  ·  hold 3 s: check now";
-    PANEL_COPY(sc.footerRight, "Wi-Fi -58 dBm");
+    sc.footerRight[0] = 0;
     shot(cv, "12-system-up-to-date", [&](Adafruit_GFX &d) { renderSystem(d, si, sc); });
     si.state = SystemInfo::Failed;
     si.availBuild = 15;
