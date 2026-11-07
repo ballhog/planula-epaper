@@ -170,7 +170,7 @@ static void samples() {
     }
     {
       Gauge &g = o.g[o.n++];
-      PANEL_COPY(g.label, "Alk (X10 D1)");
+      PANEL_COPY(g.label, "1RX10D1-Part C");
       g.lane = Lane::Events;
       g.status = Status::Ok;
       g.has = true;

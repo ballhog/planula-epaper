@@ -572,7 +572,15 @@ void laneState(const Page &p, const Gauge &g, char *out, size_t n) {
 }
 
 void timeline(Adafruit_GFX &d, const Page &p) {
-  const int labelW = 176, axisH = 30;
+  // Label column: 176 px, wider (to 250) when names need it, e.g. Hydros
+  // outputs like "1RX10D1-Part C".
+  int labelW = 176;
+  const int axisH = 30;
+  for (int i = 0; i < p.n; i++) {
+    int w = textWidth(font::Body, p.g[i].label) + 34;
+    if (w > labelW) labelW = w;
+  }
+  if (labelW > 250) labelW = 250;
   const int x0 = kBodyX + labelW, x1 = kBodyX + kBodyW - 6, pw = x1 - x0;
   const int span = p.to - p.from;
   auto X = [&](float t) { return x0 + (int)lroundf((t - p.from) * pw / (float)span); };
@@ -610,7 +618,10 @@ void timeline(Adafruit_GFX &d, const Page &p) {
     // Plot area of this lane.
     int yt = ly + 8, yb = ly + laneH - 8;
     if (g.nspark == 0) {
-      drawText(d, font::Small, x0 + 10, ly + laneH / 2 + 6, "no schedule", INK);
+      // Coeno sends the schedule; a past-only page (direct mode) has only
+      // seen the time since the panel started.
+      drawText(d, font::Small, x0 + 10, ly + laneH / 2 + 6,
+               p.to > 0 ? "no schedule" : g.lane == Lane::Events ? "no doses seen yet" : "no change seen yet", INK);
       continue;
     }
     switch (g.lane) {
