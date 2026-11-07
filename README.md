@@ -77,6 +77,8 @@ Passwords are stored on the panel (NVS) and never sent back to the browser. Ever
 
 ![Alarm](docs/screens/2-chem-3x2-alarm.png)
 
+![Numbers view with trend arrows and moved dots](docs/screens/24-numbers-trend.png)
+
 ### Outlets page (direct mode)
 
 Gauges tab → *Outlets page*: every output the Apex (`outputs`, ON/OFF = by hand, AON/AOF = auto) and the Hydros (`Output.<name>.valueState` 0–10000, `override` = by hand) report, with its live state; virtual / alert outputs hidden unless asked. Tick up to 8: they become a page after the gauge pages, 12 h up to now: on/off bars, dimmable outputs as their level (%), dosing heads as a mark per dose with its amount (`2.5`, from the Hydros dosing log). `ON since 7:15 PM` / `OFF by hand` under each name. Past only (the controllers don't share their programs). History is kept through battery sleeps, and refilled from the controllers' own logs every 30 min: the Apex output log (outputs with logging on) and the Hydros dosing log. In Coeno mode the Schedule page below shows the future too.
