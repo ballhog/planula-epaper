@@ -7,6 +7,10 @@
 #include "Settings.h"
 
 #include <math.h>
+#include <string.h>
+#include <sys/time.h>
+
+#include <type_traits>
 
 namespace outlets {
 
@@ -30,7 +34,20 @@ struct Hist {
   char key[44];
   rules::OutletHistory h;
 };
-Hist hist[kPicked];
+// In RTC memory: battery modes deep-sleep between readings, and ordinary RAM
+// (and millis()) start over on every wake, which left the Outlets page empty
+// after a night on battery. Loaded fresh on power-on / flashing.
+RTC_DATA_ATTR Hist hist[kPicked];
+static_assert(std::is_trivially_default_constructible<Hist>::value, "Hist must be plain data (RTC memory)");
+
+// Wall clock in ms, wrapping at 2^32 (rules::since() handles the wrap). Keeps
+// counting through deep sleep, unlike millis(). 0 = clock not set yet.
+uint32_t clockMs() {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  if (tv.tv_sec < 1700000000) return 0;
+  return (uint32_t)((uint64_t)tv.tv_sec * 1000u + tv.tv_usec / 1000);
+}
 
 bool picked(const char *key) {
   for (auto &o : settings::get().outlets)
@@ -45,7 +62,7 @@ Hist *histFor(const char *key, bool create) {
   // Reuse a slot whose output is no longer picked.
   for (auto &h : hist)
     if (!h.key[0] || !picked(h.key)) {
-      h = Hist();
+      memset(&h, 0, sizeof h);
       strlcpy(h.key, key, sizeof h.key);
       return &h;
     }
@@ -85,8 +102,9 @@ void update(const char *key, const char *source, const char *type, uint8_t level
   o->level = level > 100 ? 100 : level;
   if (level > 0 && level < 100) o->variable = true;
   o->atMs = millis();
-  if (picked(key))
-    if (Hist *h = histFor(key, true)) h->h.record(millis(), o->level);
+  uint32_t now = clockMs();
+  if (now && picked(key))  // no history until the clock is set (seconds after boot)
+    if (Hist *h = histFor(key, true)) h->h.record(now, o->level);
 }
 
 int count() {
@@ -125,7 +143,7 @@ bool buildPage(panel::Page &p) {
     p.clock = tm.tm_hour * 60 + tm.tm_min;
   }
   Lock l;
-  uint32_t ms = millis();
+  uint32_t ms = clockMs();
   for (auto &c : s.outlets) {
     if (p.n >= panel::kMaxGauges) break;
     panel::Gauge &g = p.g[p.n++];
@@ -153,7 +171,7 @@ bool buildPage(panel::Page &p) {
     }
     if (o->manual) PANEL_COPY(g.note, "by hand");
     PANEL_COPY(g.src, o->source);
-    Hist *h = histFor(o->key, false);
+    Hist *h = ms ? histFor(o->key, false) : nullptr;
     if (!h) continue;
     g.nspark = (uint8_t)rules::lanePoints(h->h, ms, p.from, doser, o->variable, g.t, g.spark, panel::kSparkLen);
   }

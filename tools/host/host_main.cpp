@@ -577,7 +577,7 @@ static void testRules() {
   CHECK(why == Wake::Saver && w - now == 3600);
 
   // outlet history: small ramp steps dropped, on/off always kept
-  OutletHistory oh;
+  OutletHistory oh = {};
   oh.record(0, 0);
   oh.record(1000, 2);   // to on: kept
   oh.record(2000, 4);   // +2: dropped
@@ -589,7 +589,7 @@ static void testRules() {
   CHECK(oh.len == kHist);  // full, oldest dropped
 
   // lanes over a 12 h window: state at the window start, then changes
-  OutletHistory heater;
+  OutletHistory heater = {};
   uint32_t H = 3600000u, nowMs = 20 * H;
   heater.record(1 * H, 100);   // 19 h ago: before the window
   heater.record(10 * H, 0);    // 10 h ago
@@ -599,12 +599,12 @@ static void testRules() {
   int n = lanePoints(heater, nowMs, -720, false, false, t, v, 48);
   CHECK(n == 3 && t[0] == -720 && v[0] == 1 && t[1] == -600 && v[1] == 0 && t[2] == -300 && v[2] == 1);
   // nothing inside the window: just the current state from the start
-  OutletHistory old;
+  OutletHistory old = {};
   old.record(1 * H, 100);
   n = lanePoints(old, nowMs, -720, false, false, t, v, 48);
   CHECK(n == 1 && t[0] == -720 && v[0] == 1);
   // dosers: one mark per dose start inside the window
-  OutletHistory dose;
+  OutletHistory dose = {};
   dose.record(5 * H, 100);
   dose.record(5 * H + 30000, 0);
   dose.record(12 * H, 100);
@@ -613,7 +613,7 @@ static void testRules() {
   n = lanePoints(dose, nowMs, -720, true, false, t, v, 48);
   CHECK(n == 2 && t[0] == -480 && t[1] == -120 && isnan(v[0]));
   // a wrapped millis() clock still gives the right ages
-  OutletHistory wrap;
+  OutletHistory wrap = {};
   wrap.record(0xFFFFFFFFu - 600000u, 100);  // 10 min before the wrap
   n = lanePoints(wrap, 600000u, -720, false, false, t, v, 48);
   CHECK(n == 1 && t[0] == -20);

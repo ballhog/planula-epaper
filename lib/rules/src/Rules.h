@@ -52,8 +52,11 @@ constexpr int kHist = 46;
 
 // Level changes of one output (0-100 %), times in ms. Steps under 5 % are
 // dropped (except to or from off) so a ramp doesn't fill the buffer.
+// Plain data, no default member values: the firmware keeps it in RTC memory so
+// it survives battery sleeps (zero it with `= {}` or memset). `at` is a wrapping
+// millisecond clock that must keep counting through sleep (wall clock).
 struct OutletHistory {
-  uint8_t len = 0;
+  uint8_t len;
   uint32_t at[kHist];
   uint8_t v[kHist];
   void record(uint32_t ms, uint8_t level);
