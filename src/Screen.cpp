@@ -62,30 +62,33 @@ void fillChrome(panel::Chrome &c) {
     c.alarmCount = alarms.size();
     c.alarmAcked = acked;
   }
-  String left, right;
+  // Built in fixed buffers: this runs on every draw, and on the Waveshare
+  // board short-lived Strings fragment the heap over days.
+  char left[96] = "", right[48] = "";
   bool alert = false;
   if (coenoMode()) {
     uint32_t lp = coeno::lastPageMs();
     uint32_t age = lp ? (millis() - lp) / 1000 : 0;
     if (!s.coenoHost.length()) {
-      left = "Standalone · no Coeno address set";
+      snprintf(left, sizeof left, "Standalone · no Coeno address set");
     } else if (!coeno::connected()) {
-      left = "Coeno offline · showing the last pages";
+      snprintf(left, sizeof left, "Coeno offline · showing the last pages");
       alert = true;
     } else if (lp && age > s.stale_s) {
       char a[16];
       panel::formatAge(age, a, sizeof a);
-      left = String("STALE · no page from Coeno for ") + a;
+      snprintf(left, sizeof left, "STALE · no page from Coeno for %s", a);
       alert = true;
     } else {
-      left = "Coeno · " + s.coenoHost;
       String ck = clockText();
-      if (ck.length()) left += " · updated " + ck;
+      snprintf(left, sizeof left, "Coeno · %s%s%s", s.coenoHost.c_str(), ck.length() ? " · updated " : "", ck.c_str());
     }
   } else {
-    if (s.apexOn) left += String("Apex ") + (apex::ok() ? "ok" : "offline");
-    if (s.hydrosOn) left += String(left.length() ? " · " : "") + "Hydros " + (hydros::ok() ? "ok" : "offline");
-    if (!left.length()) left = "Direct mode: no source switched on";
+    size_t n = 0;
+    if (s.apexOn) n += snprintf(left + n, sizeof left - n, "Apex %s", apex::ok() ? "ok" : "offline");
+    if (s.hydrosOn && n < sizeof left)
+      n += snprintf(left + n, sizeof left - n, "%sHydros %s", n ? " · " : "", hydros::ok() ? "ok" : "offline");
+    if (!n) snprintf(left, sizeof left, "Direct mode: no source switched on");
     alert = (s.apexOn && !apex::ok() && (int32_t)(millis() - apex::lastOkMs()) > (int32_t)(s.stale_s * 1000UL)) ||
             (s.hydrosOn && !hydros::ok() && millis() > 180000UL);
   }
@@ -100,13 +103,14 @@ void fillChrome(panel::Chrome &c) {
   if (power::sleepy()) {
     // The screen is a snapshot: say when it was taken and when the next one is.
     String at = clockText(), nx = power::nextWakeText();
-    String head = at.length() ? "Readings from " + at : String("Readings");
-    if (nx.length()) head += " · next " + nx;
-    left = head + " · " + left;
+    char status[96];
+    strlcpy(status, left, sizeof status);
+    snprintf(left, sizeof left, "Readings%s%s%s%s · %s", at.length() ? " from " : "", at.c_str(),
+             nx.length() ? " · next " : "", nx.c_str(), status);
   }
-  if (availBuild > 0 && coenoLinked()) right = "update ready, hold 3 s";
-  PANEL_COPY(c.footerLeft, left.c_str());
-  PANEL_COPY(c.footerRight, right.c_str());
+  if (availBuild > 0 && coenoLinked()) snprintf(right, sizeof right, "update ready, hold 3 s");
+  PANEL_COPY(c.footerLeft, left);
+  PANEL_COPY(c.footerRight, right);
   c.footerAlert = alert;
 }
 

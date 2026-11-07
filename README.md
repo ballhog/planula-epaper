@@ -4,14 +4,19 @@ The Corallite wall gauge panel: a 7.5" black/white e-paper that shows any value 
 
 ![Tank page](docs/screens/1-tank-2x2.png)
 
-**Hardware:** Waveshare *e-Paper ESP32 Driver Board* Rev 3 (ESP32-WROOM-32E, USB-C) and the Waveshare 7.5" e-Paper raw panel V2, 800×480 B/W.
+**Hardware**, two builds of the same firmware:
+
+| Build | Board | Notes |
+|---|---|---|
+| `env:epaper` | Waveshare *e-Paper ESP32 Driver Board* Rev 3 (ESP32-WROOM-32E, USB-C) + Waveshare 7.5" V2 raw panel, 800×480 B/W | one BOOT button, wall power, ~300 kB RAM (the frame is drawn in 120-row strips) |
+| `env:reterminal` | Seeed **reTerminal E1001** (ESP32-S3, 8 MB PSRAM, 7.5" 800×480 B/W, case, 2000 mAh battery) | three buttons, buzzer, SHT4x room sensor, battery power modes |
 
 ## Modes
 
 | Mode | Where the pages come from | What's needed |
 |---|---|---|
-| **Coeno** (default) | Coeno builds every page: which gauges, normal bands, alarm limits, 24 h sparklines. It publishes them retained over MQTT and the panel only draws them. | Coeno on the LAN |
-| **Direct** | The panel reads the **Apex** (local REST, Basic auth) and/or the **Hydros** (CoralVue cloud) itself. You pick gauges, pages and limits on the panel's own settings page. | Apex login and/or Hydros app login |
+| **Coeno** | Coeno builds every page: which gauges, normal bands, alarm limits, 24 h sparklines. It publishes them retained over MQTT and the panel only draws them. | Coeno on the LAN |
+| **Direct** (default for new panels) | The panel reads the **Apex** (local REST, Basic auth) and/or the **Hydros** (CoralVue cloud) itself. You pick gauges, pages and limits on the panel's own settings page. | Apex login and/or Hydros app login |
 
 Coeno is still used in direct mode when a host is set: firmware updates, panel status and remote commands.
 The Coeno address starts **blank**: a new panel is standalone (screen says so, no connection attempts, updates from GitHub) until you set it. Panels that already had one keep it.
@@ -27,7 +32,15 @@ The Coeno address starts **blank**: a new panel is standalone (screen says so, n
 
 ![Setup screen](docs/screens/6-setup.png)
 
-## The BOOT button
+## Buttons
+
+### reTerminal: three buttons, set under Display → Buttons
+
+Each button has a short-press action and a 3 s hold action (on release): previous / next page, switch view, the Outlets / Schedule page (and back), "go to page N (and back)" for each page, fresh readings now, System screen, nothing. Defaults: left = previous page, middle = switch view (held: System screen; held again there: check for updates), right = next page. While an alarm is showing, the first press of the middle button (or any button, if set) acknowledges it and stops the beeps. Fixed: middle held 10 s = setup network, left + right held 10 s = erase settings. On battery, the press that wakes the panel only wakes it.
+
+Pins (Seeed): KEY0 GPIO3 right (green), KEY1 GPIO4 middle, KEY2 GPIO5 left, active low; buzzer GPIO45; LED GPIO6; SHT4x 0x44 on SDA 19 / SCL 20; battery GPIO1 (1:2 divider) gated by GPIO21; microSD CS 14 (held high, it shares the bus).
+
+### Waveshare board: the BOOT button
 
 | Press | Does |
 |---|---|
@@ -42,24 +55,36 @@ The Coeno address starts **blank**: a new panel is standalone (screen says so, n
 - **Wi-Fi**: up to 6 saved networks, scan, reorder. If none can be joined for 60 s, the setup network opens again.
 - **Data source**: mode, Coeno address, **Apex** (address, user, password, poll interval, °F/°C, *Test login*), **Hydros** (e-mail, password, *Test login*).
 - **Gauges** (direct mode): up to 6 pages (title, layout) and 40 gauges. Pick from every reading the Apex/Hydros reported, then set the label, unit, decimals, normal band and alarm limits. Picking pH/temp/salinity/ORP/alk/Ca/Mg fills in typical reef limits.
-- **Display**: time zone, 12/24 h clock, °F, auto page rotation, stale time, full-refresh interval, panel driver (`t7` / `gdey`; some 7.5" V2 batches need the second one).
+- **Display**: time zone, 12/24 h clock, °F, tile view (number + trend / graphs / numbers only), page rotation (buttons only, every 2, 5, 15, 30, 60 min or 2 h), stale time, full-refresh interval, panel driver (`t7` / `gdey`; some 7.5" V2 batches need the second one). reTerminal only: **Power** (Live / Saver / Daily), **Beep on alarms**, **Buttons**.
 - **System**: name (also `<name>.local` and the Coeno id), settings password (HTTP basic auth, user `admin`; defaults to the board's setup Wi-Fi password, never blank; erasing settings keeps that password so a printed label stays valid), firmware check/install from Coeno, restart, erase.
 
 Passwords are stored on the panel (NVS) and never sent back to the browser. Everything needs the login except next page / refresh (`POST /api/page`, `/api/refresh`), which stay open like the button.
 
 ## What the screen does
 
+- Gauge pages have **no header**: the page title and page dots sit at the left of the footer, then the status (`Apex ok · Hydros ok`), and Wi-Fi bars and battery as icons on the right. The tiles get the full height.
 - Layouts: 1 big gauge, 2–3 side by side, 2×2, 3×2, or a list (auto picks by count, or set it per page).
-- Every tile shows the value, unit, source and age, and a 24 h sparkline with the normal band dashed.
-- **Warn** (outside the normal band): thick border and a HIGH/LOW tag. **Alarm**: the tile inverts, a banner replaces the header, and the whole screen flashes when the alarm starts. Then one flash every 5 min until someone presses the button (or acks from Coeno). After the ack the banner is drawn hollow until the value is back in range.
+- **Views** (Display setting, the Switch view button, or a reTerminal button):
+  - *Number and trend*: value, unit, source and age, with the 24 h sparkline and the normal band dashed.
+  - *Graphs*: the trend fills the tile, with `24 h  397 – 399` (low – high, including the current value) under it.
+  - *Numbers only*: each value centred and as big as the tile allows, unit in the lower-right corner; values of 100+ drop decimals.
+  One tile gets 240 px digits, two side by side 150 px (BigFont: past Adafruit GFX's ~128 px limit).
+- Trends have a minimum height per unit (5 % humidity, 0.1 pH, 1 °F / 0.5 °C, 0.5 ppt, 20 mV …) so noise draws flat.
+- **Warn** (outside the normal band): thick border and a HIGH/LOW tag. **Alarm** (past an alarm limit): with one or two alarms on a page, an **alarm takeover**: they get the left half (big value + 24 h trend) and the rest becomes a compact list on the right (three or more: the normal grid with black tiles). The footer turns black with the alarm text, the screen flashes when it starts, then every 5 min (and on the reTerminal three beeps) until acknowledged. After the ack the footer says "· acknowledged".
 - **Stale**: values older than the stale time get a dashed border and "STALE 14 min". If Coeno stops sending pages or goes offline, the footer turns black and says so. Old values are never shown as current.
-- Refresh: partial (no flash, < 1 s) when something visible changes, at most once a minute. Full (flashing) refresh after 60 partials or hourly, to clear ghosting. The panel's voltages are switched off between updates.
+- Refresh: partial (no flash, < 1 s) when something visible changes, at most once a minute; at once when a gauge gets its first value. Full (flashing) refresh after 60 partials, hourly, or when the screen changes (page, view). The panel's voltages are switched off between updates.
 
 ![Alarm](docs/screens/2-chem-3x2-alarm.png)
 
+### Outlets page (direct mode)
+
+Gauges tab → *Outlets page*: every output the Apex (`outputs`, ON/OFF = by hand, AON/AOF = auto) and the Hydros (`Output.<name>.valueState` 0–10000, `override` = by hand) report, with its live state; virtual / alert outputs hidden unless asked. Tick up to 8: they become a page after the gauge pages, 12 h up to now: on/off bars, dimmable outputs as their level (%), dosing heads as a mark per dose. `ON since 7:15 PM` / `OFF by hand` under each name. Past only (the controllers don't share their programs) and empty after a restart; in Coeno mode the Schedule page below shows the future too.
+
+![Outlets page](docs/screens/20-outlets.png)
+
 ### Schedule (timeline) pages
 
-**Coeno mode only** (Coeno builds the lanes; a direct-mode page set to timeline falls back to auto). `"layout": "timeline"`: each gauge is a lane, time runs across, a black line marks now. What already happened is drawn solid (hatched under a ramp, filled bars, filled dots); what is scheduled is drawn hollow. Up to 10 lanes and 48 points per lane.
+**Coeno mode** (Coeno builds the lanes; a direct-mode gauge page set to timeline falls back to auto). `"layout": "timeline"`: each gauge is a lane, time runs across, a black line marks now. What already happened is drawn solid (hatched under a ramp, filled bars, filled dots); what is scheduled is drawn hollow. Up to 10 lanes and 48 points per lane.
 
 | Lane `kind` | For | Drawn as | Label cell says |
 |---|---|---|---|
@@ -119,9 +144,10 @@ On the Coeno side, `coeno/services/panel_pages.py` builds the pages every 60 s a
 
 ## Direct-mode details
 
-- **Apex**: `GET http://<apex>/rest/status` with Basic auth (same call Coeno makes). Only `inputs` are kept (a JSON filter, so a large status doesn't run the board out of memory). Temperatures are converted to °C (°F detected from the value or set explicitly).
+- **Apex**: `GET http://<apex>/rest/status` with Basic auth (same call Coeno makes). Only `inputs` and `outputs` (name, type, status) are kept (a JSON filter, so a large status doesn't run the board out of memory). Temperatures are converted to °C (°F detected from the value or set explicitly). `apex.local` addresses are looked up over mDNS (the ESP32's DNS doesn't).
 - **Hydros**: the same cloud path as Coeno's `hydros_service` / pyhydros. A Cognito `USER_PASSWORD_AUTH` login gets an ID token. Then `cv.hydros.link/user` gives the controllers, `/thing/<id>` the Cognito identity and AWS IoT endpoint, and `GetCredentialsForIdentity` temporary keys. The panel then opens MQTT over a SigV4-signed WebSocket (`lib/sigv4`, checked against AWS's published example). It subscribes `<user>/<thing>/rsp/#` and requests `.../req/LISTEN/statusc`. Payloads may be zlib behind a short header (inflated with the ESP32's ROM miniz). The session is rebuilt every 50 min and after 10 min of silence.
-- Each value keeps a 24 h trend in RAM (one point per 30 min) for the sparklines; it starts empty after a restart.
+- Each value keeps a 24 h trend in RAM (one point per 30 min, half floats, 64 readings) for the sparklines; it starts empty after a restart (on battery it is kept through deep sleep).
+- **Battery power modes** (reTerminal, `src/Power.*`, rules in `lib/rules`): *Saver* wakes every N min and redraws only when a value moved by its step (pH 0.02, 0.1 °C / 0.2 °F, 0.1 ppt, 5 mV, 2 %, 1 % ppm) or a status changed, and at least hourly; *Daily* updates at a set time, with an optional hourly alarm check that redraws only on a status change. Deep sleep between; any button wakes it (awake 2 min after the last press or web request, 5 min after power-on). Readings, page and alarm acknowledgement survive the sleep in RTC memory; Wi-Fi rejoins the last access point by BSSID + channel without a scan. The footer says `Readings from 7:02 · next 8:00` instead of a clock.
 - **Where the network work runs**: `loop()` only draws, serves the settings page and reads the button. Apex polls, Hydros logins, update checks and downloads, and the Test buttons are queued to one background task (`src/Worker.*`) and run one at a time, so a slow Apex or login never freezes the page.
 - **One TLS connection at a time**: there's RAM for one (~40 kB). Every `https::` call takes a token (`tls::acquire`); the Hydros AWS session keeps it while it runs and steps aside when something else asks, then logs in again. Calling `https::` from `loop()` fails at once and logs `[tls] … called from loop()`.
 
@@ -144,12 +170,16 @@ upload a `firmware.bin` from the System page, or use `pio run -e epaper-net -t u
 the running build was made with `CALYX_OTA_PASS` set; public release builds don't listen for it). Coeno and
 GitHub updates are SHA-256 checked (a manifest without `sha256` is refused), and any new build that doesn't get on Wi-Fi and draw within 120 s rolls back.
 
-`lib/panel` (model, text, layouts, page JSON, status rules) has no ESP32 code. The host renderer draws the exact same frames as the panel, which is where `docs/screens/` comes from.
+`lib/panel` (model, text, layouts, page JSON, status rules) and `lib/rules` have no ESP32 code. The host renderer draws the exact same frames as the panel (checking that banded and whole-frame drawing agree), which is where `docs/screens/` comes from, and runs the logic tests: page JSON, SigV4, and the rules with real values from the logs (DST night, `millis()` wrap, Hydros water change and dosers, Apex output states).
 
 Layout:
 
 ```
-src/main.cpp          loop: pages, alarms, button, updates
+src/main.cpp          setup, loop, Coeno state/commands, app:: (Shared.h: state shared by the next four)
+src/Screen.cpp        footer, building pages, draw(); Alarms.cpp; Keys.cpp (buttons); Updates.cpp
+src/Power.*, Board.*  reTerminal: battery modes / deep sleep; room sensor, battery, buzzer
+src/Outlets.*         controller outputs and their history (Outlets page)
+src/Worker.*          the background network task and the one-TLS-connection token
 src/Display.*         GxEPD2 driver, refresh policy, alarm flash, BMP for the web page
 src/Net.*             Wi-Fi (multi-network), setup network + captive portal, mDNS, NTP
 src/Web.*, web/       settings page + JSON API (web/index.html is embedded at build time)
@@ -159,28 +189,16 @@ src/Apex.*, Hydros.*  direct-mode sources; src/Readings.* the values they produc
 src/DirectPages.*     direct-mode page builder
 lib/panel             rendering + page model (host-testable)
 lib/sigv4             AWS SigV4 presigning (host-testable)
+lib/rules             battery redraw / wake rules, outlet history, controller output states (host-tested)
 lib/qrcodegen         Nayuki QR Code generator (MIT)
 lib/ota               pull OTA from Coeno with SHA-256 and rollback (shared with the Calyx nodes)
-tools/mkfonts.py      Inter → Adafruit GFX fonts (adds °, µ, ³, ₂, —, ·, ▲, ▼)
+tools/mkfonts.py      Inter → Adafruit GFX fonts (adds °, µ, ³, ₂, —, ·, ▲, ▼) and BigFont digits (150-240 px)
 ```
 
-## Verified on hardware (Waveshare board, builds 1-19)
+## Verified on hardware
 
-Driver `t7` with switch 1 on A; Hydros cloud login and IoT stream; Apex `/rest/status` (AC6 5.16_AC26, through an SSH tunnel).
-Still open: GPIO2 "LED" (unused), runs longer than ~20 min.
-
-## Seeed reTerminal E1001 (`env:reterminal`, compiles, not yet run)
-
-Pins from Seeed's docs; whole frame in PSRAM; own firmware image (`planula-epaper-s3`, GitHub `latest-s3.json`).
-
-Planned once the unit is here (decided 2026-10-29):
-
-- **Buttons (built, build after 2026-11-06)**: left / right = previous / next page; middle = acknowledge the alarm, else switch the view (number + trend → graphs → numbers only, saved; also under Display). Middle hold 3 s = System screen, 10 s = setup network; left + right held 10 s = erase settings. Pins from Seeed: KEY0 GPIO3 right, KEY1 GPIO4 middle, KEY2 GPIO5 left, active low. Views: `docs/screens/15-…`, `16-…`, `17-…`.
-- **Power modes** (built 2026-11-06, `src/Power.*`; Display → Power, reTerminal only):
-  - **Live**: wall power, as today.
-  - **Saver**: wake every few minutes; redraw only when a value moves more than a step (pH 0.02, temp 0.1°, salinity 0.1 ppt, ORP 5 mV) or a status changes, and at least hourly. Shows "updated 10:40", not a running clock.
-  - **Daily**: one update a day at a set time, plus any button press, plus an **hourly alarm check**: wake for a few seconds, compare against alarm limits, sleep again without touching the screen unless something is out of range (then redraw with the alarm tile and beep). The screen says plainly how old the readings are ("Readings from 7:00 this morning").
-  - Battery wakes go through Coeno or Apex (seconds on the LAN). Hydros direct needs a 10-20 s cloud login per wake, so it suits Live mode, or Coeno doing the Hydros side.
-- SHT40 room temperature / humidity and battery as Panel readings (built). Buzzer on GPIO45 (built): three beeps on a new alarm and every 5 min until acknowledged (middle button); on battery, once per wake that shows an unacknowledged alarm. Display → "Beep on alarms".
+- **Waveshare board** (builds 1-19): driver `t7` with switch 1 on A; Hydros cloud login and IoT stream; Apex `/rest/status` (AC6 5.16_AC26, through an SSH tunnel).
+- **reTerminal E1001** (from build 39, 2026-11-06): display, buttons (`[keys]` log), Apex over `apex.local`, Hydros direct, room humidity and battery readings, Outlets page with Apex and Hydros outputs, settings page.
+- Not yet run on hardware: the battery modes over a night, the buzzer, the fast Wi-Fi rejoin, builds after 52. See `TODO.md`.
 
 Fonts: Inter, SIL Open Font License 1.1. QR code: Nayuki, MIT.
