@@ -37,6 +37,11 @@ const char *nameOf(const char *key);  // the part after "source:"
 // as (epoch seconds, level 0-100), oldest first. The current state is added
 // after them. False if the output isn't picked.
 bool setHistory(const char *key, const uint32_t *atS, const uint8_t *level, int n);
+// Replace a picked dosing head's history with doses from its log (epoch s
+// and mL, oldest first).
+bool setDoses(const char *key, const uint32_t *atS, const float *ml, int n);
+// Seen as a dosing head (now, or before the last battery sleep).
+bool isDoser(const char *key);
 // Is this output picked for the Outlets page.
 bool isPicked(const char *key);
 

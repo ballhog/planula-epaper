@@ -44,7 +44,7 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
   `main.cpp`, mostly the footer/status lines built on every draw. Harmless on
   the reTerminal (PSRAM); on the Waveshare board they fragment the heap over
   days. Fixed `char` buffers for the per-draw ones.
-- [ ] **7. Remove the one-off Hydros boot dumps** (status layout, outputs
+- [x] **7. Remove the one-off Hydros boot dumps** (status layout, outputs
   section, dosing head) once the dose-amount question is answered.
 - [x] **8. Refresh the README.** Still describes the old header, the
   single-button layout on the reTerminal and other pre-build-40 details;
@@ -52,7 +52,7 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
 
 ## Next round (2026-11-07, after a night on battery)
 
-- [ ] **9. History from the controllers, not just what the panel saw.** On
+- [x] **9. History from the controllers, not just what the panel saw.** On
   battery the panel looks every 15 min: trends are coarse, outlet changes land
   late, short doses are missed, and a reflash starts from nothing. Read the
   Apex data log and outlet log (`/rest/ilog`, `/rest/olog`) on each wake for
@@ -74,7 +74,10 @@ The e-paper itself (~0.9 s partial, ~1.6 s full refresh) is the floor.
 
 ## Open questions
 
-- [ ] **Hydros dose amounts.** Waiting on the `[hydros] a dosing head: …` boot
+- [x] **Hydros dose amounts.** Answered 2026-11-07: the status has no dose
+  volume (`remaining`, `reservoir` only); the amounts come from the cloud
+  dosing log (`GET /logs`), read every 30 min and shown above the marks.
+  Was: Waiting on the `[hydros] a dosing head: …` boot
   line: if the status carries a dose volume, show it above each dose mark on
   the Outlets page (like "2.5" on the Coeno Schedule page).
 - [ ] **Battery life.** Measure: Saver every 10 min overnight on battery, note

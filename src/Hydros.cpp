@@ -8,6 +8,7 @@
 #include <mqtt_client.h>
 #include <time.h>
 
+#include <utility>
 #include <vector>
 
 #include "Https.h"
@@ -55,6 +56,11 @@ String lastLogged;
 bool fromCache = false;
 volatile bool sawConnect = false;
 time_t credExp = 0;  // when the session's AWS credentials run out (0 unknown)
+// The Cognito id token (an hour), for the REST calls made while the session
+// holds the TLS token (the dosing log). Saved with the sign-in.
+String idTok;
+uint32_t idTokExp = 0;
+RTC_DATA_ATTR uint32_t doseLogsAtS;  // last dosing-log read (epoch s), kept through sleep
 
 void setState(const String &st) {
   state = st;
@@ -189,6 +195,8 @@ struct Saved {
   uint32_t at = 0;                                 // profile saved (epoch s)
   String ak, sk, tok;
   uint32_t exp = 0;                                // credentials expire (epoch s)
+  String idt;                                      // Cognito id token
+  uint32_t idtExp = 0;
 };
 const char *kNvs = "hydros";
 
@@ -207,6 +215,8 @@ bool loadSaved(const String &user, Saved &c) {
     c.sk = p.getString("sk", "");
     c.tok = p.getString("tok", "");
     c.exp = p.getUInt("exp", 0);
+    c.idt = p.getString("idt", "");
+    c.idtExp = p.getUInt("idte", 0);
   }
   p.end();
   return ok && c.uid.length() && c.identity.length() && c.endpoint.length() && c.things.length();
@@ -233,6 +243,9 @@ void saveCreds(const Saved &c) {
   p.putString("sk", fits ? c.sk : String());
   p.putString("tok", fits ? c.tok : String());
   p.putUInt("exp", fits ? c.exp : 0);
+  bool idFits = c.idt.length() < 3900;
+  p.putString("idt", idFits ? c.idt : String());
+  p.putUInt("idte", idFits ? c.idtExp : 0);
   p.end();
 }
 
@@ -301,6 +314,8 @@ void useSaved(const Saved &c) {
                                    amzDate().c_str())
                .c_str();
   credExp = c.exp;
+  idTok = c.idt;
+  idTokExp = c.idtExp;
 }
 
 // Steps 1-4. On success fills things, userId, wsHost, wsPath.
@@ -320,6 +335,8 @@ String connectSteps(const String &user, const String &pass, bool forTest, String
   Login L = login(user, pass);
   if (L.error.length()) return L.error;
   if (saved) {
+    c.idt = L.idToken;
+    c.idtExp = (uint32_t)time(nullptr) + 55 * 60;  // Cognito id tokens last an hour
     String e = getCreds(L, c);
     if (!e.length()) {
       useSaved(c);
@@ -398,6 +415,8 @@ String connectSteps(const String &user, const String &pass, bool forTest, String
   n.region = region;
   n.things = thingsText(top);
   n.at = (uint32_t)time(nullptr);
+  n.idt = L.idToken;
+  n.idtExp = n.at + 55 * 60;
   String e = getCreds(L, n);
   if (e.length()) return e;
   useSaved(n);
@@ -467,7 +486,6 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
   filter["Output"]["*"]["fillvalueState"] = true;
   JsonDocument doc;
   DeserializationError err;
-  long inflLen = -1;
   if (n > 2 && p[0] == 0x78) {
     // Inflate as a stream through a fixed 32 kB window (allocated once), so the
     // size of the JSON inside doesn't matter. See InflateReader.
@@ -482,38 +500,9 @@ void handlePayload(const String &topic, uint8_t *data, size_t len) {
                     st == TINFL_STATUS_HAS_MORE_OUTPUT ? ", inflates to more than 16 kB" : "");
       return;
     }
-    inflLen = m;
     err = deserializeJson(doc, (const char *)inflater.out, (size_t)m, DeserializationOption::Filter(filter));
   } else {
     err = deserializeJson(doc, (const char *)p, n, DeserializationOption::Filter(filter));
-  }
-  // Once per boot: what the status says about outputs, so their format can be
-  // read off the log (the panel only uses the inputs so far).
-  static bool shownOutputs = false;
-  if (!shownOutputs && inflLen > 0) {
-    shownOutputs = true;
-    const char *js = (const char *)inflater.out;
-    int jl = (int)inflLen;
-    Serial.printf("[hydros] status layout (%d bytes) starts: %.*s\n", jl, jl < 200 ? jl : 200, js);
-    const char *o = nullptr;
-    for (const char *needle : {"\"Output", "\"output", "\"Relay", "\"Outlet"}) {
-      for (int i = 0; !o && i + (int)strlen(needle) <= jl; i++)
-        if (!memcmp(js + i, needle, strlen(needle))) o = js + i;
-      if (o) break;
-    }
-    if (o) {
-      int left = jl - (int)(o - js);
-      Serial.printf("[hydros] outputs section: %.*s\n", left < 700 ? left : 700, o);
-      // A dosing head in full (for the dose amount, if the status has one).
-      for (int i = (int)(o - js); i + 5 < jl; i++)
-        if (!memcmp(js + i, "\"rpm\"", 5)) {
-          int a = i - 120 < 0 ? 0 : i - 120;
-          Serial.printf("[hydros] a dosing head: %.*s\n", jl - a < 600 ? jl - a : 600, js + a);
-          break;
-        }
-    } else {
-      Serial.println("[hydros] no Output section found in the status");
-    }
   }
   if (err) {
     Serial.printf("[hydros] %s: %u bytes, JSON %s (free %u)\n", topic.c_str(), (unsigned)len, err.c_str(),
@@ -673,6 +662,92 @@ bool startClient() {
   return e == ESP_OK;
 }
 
+// Dosing amounts. The status only says a head is running; the cloud keeps a
+// dosing log per output (GET /logs?thingName=&name=, newest first, "time" in
+// ms and the amount in "valueString", e.g. "... 2.5 ml", or "valueDec"; same
+// call as pyhydros' get_dosing_logs). Read every 30 min for the picked dosing
+// heads, while this task holds the TLS token and before the session opens.
+float doseMl(JsonObjectConst r) {
+  const char *vs = r["valueString"] | "";
+  for (const char *p = vs; *p; p++) {
+    if ((p[0] == 'm' || p[0] == 'M') && (p[1] == 'l' || p[1] == 'L')) {
+      const char *q = p;
+      while (q > vs && (q[-1] == ' ')) q--;
+      const char *e = q;
+      while (q > vs && (isdigit((unsigned char)q[-1]) || q[-1] == '.')) q--;
+      if (q < e) return strtof(q, nullptr);
+    }
+  }
+  for (const char *k : {"valueDec", "value"}) {
+    JsonVariantConst v = r[k];
+    if (v.is<float>() || v.is<int>()) return v.as<float>();
+    if (v.is<const char *>()) {
+      float f = strtof(v.as<const char *>(), nullptr);
+      if (f > 0) return f;
+    }
+  }
+  return 0;
+}
+
+void readDoseLogs() {
+  uint32_t nowS = (uint32_t)time(nullptr);
+  if (!idTok.length() || nowS + 60 > idTokExp) return;  // next real login brings a token
+  if (doseLogsAtS && nowS - doseLogsAtS < 30 * 60 && doseLogsAtS <= nowS) return;
+  doseLogsAtS = nowS;
+  const Settings &s = settings::get();
+  for (auto &o : s.outlets) {
+    if (!o.key.startsWith("hydros:")) continue;
+    if (!outlets::isDoser(o.key.c_str())) continue;  // only dosing heads have a dosing log
+    int sl = o.key.indexOf('/');
+    if (sl < 0) continue;
+    String thing = o.key.substring(7, sl), name = o.key.substring(sl + 1);
+    char q[48];
+    snprintf(q, sizeof q, "&count=60&start=%llu", (unsigned long long)(nowS - 24UL * 3600UL) * 1000ULL);
+    String url = String(kApi) + "/logs?thingName=" + sigv4::uriEncode(thing.c_str()).c_str() +
+                 "&name=" + sigv4::uriEncode(name.c_str()).c_str() + q;
+    JsonDocument filter;
+    filter[0]["time"] = true;
+    filter[0]["valueString"] = true;
+    filter[0]["valueDec"] = true;
+    filter[0]["value"] = true;
+    JsonDocument d;
+    https::Result r = https::requestJson("GET", url, {{"Authorization", idTok}, {"Content-Type", "application/json"}}, "",
+                                         d, &filter);
+    if (r.status != 200 || r.error.length()) {
+      Serial.printf("[hydros] dosing log for %s: HTTP %d %s\n", name.c_str(), r.status, r.error.c_str());
+      continue;
+    }
+    JsonArrayConst arr = d.as<JsonArrayConst>();
+    int total = arr.size(), m = 0;
+    if (total > 60) total = 60;
+    uint32_t at[60];
+    float ml[60];
+    // Newest first in the reply: fill from the back so the arrays run oldest first.
+    for (JsonObjectConst rec : arr) {
+      if (m >= total) break;
+      double t = rec["time"].is<double>() ? rec["time"].as<double>() : strtod(rec["time"] | "0", nullptr);
+      if (t < 1.7e12) continue;
+      at[m] = (uint32_t)(t / 1000.0);
+      ml[m] = doseMl(rec);
+      m++;
+    }
+    for (int i = 0; i < m / 2; i++) {
+      std::swap(at[i], at[m - 1 - i]);
+      std::swap(ml[i], ml[m - 1 - i]);
+    }
+    // Keep oldest-first order even if the reply wasn't sorted.
+    for (int i = 1; i < m; i++)
+      for (int j = i; j > 0 && at[j - 1] > at[j]; j--) {
+        std::swap(at[j - 1], at[j]);
+        std::swap(ml[j - 1], ml[j]);
+      }
+    bool set = m && outlets::setDoses(o.key.c_str(), at, ml, m);
+    Serial.printf("[hydros] dosing log for %s: %d dose(s) in 24 h%s%s\n", name.c_str(), m,
+                  m ? ", last " : "", m ? (String(ml[m - 1], 1) + " mL").c_str() : "");
+    if (!set && m) Serial.printf("[hydros] (not shown: %s isn't on the Outlets page)\n", name.c_str());
+  }
+}
+
 void loginJob(String user, String pass, uint8_t g) {
   String err;
   if (!tls::acquire("Hydros login")) {
@@ -682,6 +757,7 @@ void loginJob(String user, String pass, uint8_t g) {
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     err = connectSteps(user, pass, false, nullptr);
+    if (!err.length()) readDoseLogs();
     if (err.length()) tls::release();
     else tls::detach("Hydros session");  // kept until stopClient()
   }

@@ -59,7 +59,10 @@ struct OutletHistory {
   uint8_t len;
   uint32_t at[kHist];
   uint8_t v[kHist];
+  uint16_t ml10[kHist];  // dosing heads: amount of the dose starting here, 0.1 mL (0 unknown)
   void record(uint32_t ms, uint8_t level);
+  // A dose from a dosing log: a start (with its amount) and an end a second later.
+  void recordDose(uint32_t ms, float ml);
 };
 
 // Timeline points for a lane covering `fromMin` (negative) up to now.

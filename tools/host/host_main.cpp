@@ -523,6 +523,25 @@ static void testHistory() {
   CHECK(fabsf(pts[2] - 8.0f) < 1e-4f && fabsf(pts[3] - 8.2f) < 1e-4f);
   uint16_t none[3] = {0, 0, 0};
   CHECK(slotPoints(sum, none, 3, pts) == 0);
+  // doses from a dosing log carry their amount to the lane
+  {
+    const uint32_t H = 3600000u;
+    OutletHistory d = {};
+    d.recordDose(2 * H, 2.5f);
+    d.recordDose(6 * H, 3.0f);
+    d.recordDose(7 * H, 0);  // amount unknown
+    CHECK(d.len == 6);
+    int16_t t[48];
+    float v[48];
+    int n = lanePoints(d, 8 * H, -720, true, false, t, v, 48);
+    CHECK(n == 3);
+    CHECK(t[0] == -360 && fabsf(v[0] - 2.5f) < 1e-4f);
+    CHECK(t[1] == -120 && fabsf(v[1] - 3.0f) < 1e-4f);
+    CHECK(t[2] == -60 && isnan(v[2]));
+    d.record(8 * H, 100);  // a live "running" report after the log: a dose start without amount
+    n = lanePoints(d, 8 * H, -720, true, false, t, v, 48);
+    CHECK(n == 4 && t[3] == 0 && isnan(v[3]));
+  }
   // output log states
   CHECK(apexOn("ON") && apexOn("AON") && apexOn("TBL") && apexOn("1"));
   CHECK(!apexOn("OFF") && !apexOn("AOF") && !apexOn("0") && !apexOn(nullptr));

@@ -105,11 +105,21 @@ void OutletHistory::record(uint32_t ms, uint8_t level) {
   if (len >= kHist) {
     memmove(at, at + 1, sizeof(at[0]) * (kHist - 1));
     memmove(v, v + 1, kHist - 1);
+    memmove(ml10, ml10 + 1, sizeof(ml10[0]) * (kHist - 1));
     len = kHist - 1;
   }
   at[len] = ms;
   v[len] = level;
+  ml10[len] = 0;
   len++;
+}
+
+void OutletHistory::recordDose(uint32_t ms, float ml) {
+  if (len && v[len - 1]) record(ms - 1000, 0);  // close an open dose first
+  record(ms, 100);
+  if (len && v[len - 1] == 100 && at[len - 1] == ms && ml > 0)
+    ml10[len - 1] = (uint16_t)(ml * 10.0f + 0.5f > 65535 ? 65535 : ml * 10.0f + 0.5f);
+  record(ms + 1000, 0);
 }
 
 int lanePoints(const OutletHistory &h, uint32_t nowMs, int fromMin, bool doser, bool variable, int16_t *t, float *val,
@@ -121,7 +131,7 @@ int lanePoints(const OutletHistory &h, uint32_t nowMs, int fromMin, bool doser, 
       if (h.v[k] == 0 || (k > 0 && h.v[k - 1] > 0)) continue;  // dose starts only
       if (ago(k) > -fromMin) continue;
       t[n] = (int16_t)-ago(k);
-      val[n++] = NAN;
+      val[n++] = h.ml10[k] ? h.ml10[k] / 10.0f : NAN;
     }
     return n;
   }

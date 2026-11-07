@@ -32,6 +32,7 @@ int n = 0;
 // ramp steps dropped).
 struct Hist {
   char key[44];
+  uint8_t doser;  // seen as a dosing head (so its log is worth reading after a sleep)
   rules::OutletHistory h;
 };
 // In RTC memory: battery modes deep-sleep between readings, and ordinary RAM
@@ -104,10 +105,21 @@ void update(const char *key, const char *source, const char *type, uint8_t level
   o->atMs = millis();
   uint32_t now = clockMs();
   if (now && picked(key))  // no history until the clock is set (seconds after boot)
-    if (Hist *h = histFor(key, true)) h->h.record(now, o->level);
+    if (Hist *h = histFor(key, true)) {
+      h->h.record(now, o->level);
+      h->doser = !strcmp(type, "doser");
+    }
 }
 
 bool isPicked(const char *key) { return picked(key); }
+
+bool isDoser(const char *key) {
+  Lock l;
+  for (int i = 0; i < n; i++)
+    if (!strcmp(items[i].key, key)) return !strcmp(items[i].type, "doser");
+  Hist *h = histFor(key, false);
+  return h && h->doser;
+}
 
 bool setHistory(const char *key, const uint32_t *atS, const uint8_t *level, int nIn) {
   uint32_t now = clockMs();
@@ -120,6 +132,23 @@ bool setHistory(const char *key, const uint32_t *atS, const uint8_t *level, int 
   memset(h, 0, sizeof *h);
   strlcpy(h->key, k, sizeof h->key);
   for (int i = 0; i < nIn; i++) h->h.record((uint32_t)((uint64_t)atS[i] * 1000u), level[i] > 100 ? 100 : level[i]);
+  for (int i = 0; i < n; i++)
+    if (!strcmp(items[i].key, key)) h->h.record(now, items[i].level);
+  return true;
+}
+
+bool setDoses(const char *key, const uint32_t *atS, const float *ml, int nIn) {
+  uint32_t now = clockMs();
+  if (!now || !picked(key)) return false;
+  Lock l;
+  Hist *h = histFor(key, true);
+  if (!h) return false;
+  char k[sizeof h->key];
+  strlcpy(k, h->key, sizeof k);
+  memset(h, 0, sizeof *h);
+  strlcpy(h->key, k, sizeof h->key);
+  h->doser = 1;
+  for (int i = 0; i < nIn; i++) h->h.recordDose((uint32_t)((uint64_t)atS[i] * 1000u), ml[i]);
   for (int i = 0; i < n; i++)
     if (!strcmp(items[i].key, key)) h->h.record(now, items[i].level);
   return true;
@@ -180,6 +209,7 @@ bool buildPage(panel::Page &p) {
     bool doser = !strcmp(o->type, "doser");
     g.lane = doser ? panel::Lane::Events : o->variable ? panel::Lane::Step : panel::Lane::OnOff;
     g.has = true;
+    if (doser) g.dec = 1;  // dose amounts above the marks: "2.5"
     if (o->variable) {
       g.value = o->level;
       PANEL_COPY(g.unit, "%");
