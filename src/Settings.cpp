@@ -84,6 +84,9 @@ void toJson(JsonObject o, bool with) {
   k["middle"] = s.keyMid;
   k["right"] = s.keyRight;
   k["ack"] = s.keyAck;
+  k["hold_left"] = s.holdLeft;
+  k["hold_middle"] = s.holdMid;
+  k["hold_right"] = s.holdRight;
   JsonObject d = o["display"].to<JsonObject>();
   d["tz"] = s.tz;
   d["clock24"] = s.clock24;
@@ -210,6 +213,9 @@ String applyJson(JsonObjectConst o) {
     act(k["left"], s.keyLeft);
     act(k["middle"], s.keyMid);
     act(k["right"], s.keyRight);
+    act(k["hold_left"], s.holdLeft);
+    act(k["hold_middle"], s.holdMid);
+    act(k["hold_right"], s.holdRight);
     if (k["ack"].is<const char *>()) {
       String a = k["ack"].as<const char *>();
       if (a == "middle" || a == "any") s.keyAck = a;

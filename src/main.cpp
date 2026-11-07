@@ -624,24 +624,9 @@ void keys() {
   }
 
   bool infoUp = infoUntil && now < infoUntil;
-  // Short presses do what Display → Buttons says; holds are fixed.
-  auto shortPress = [&](const String &action, bool isMiddle) {
-    const Settings &s = settings::get();
-    bool ackHere = s.keyAck == "any" || isMiddle;
-    if (ackHere && !alarms.empty() && !acked) {
-      app::ackAlarm();
-      return;
-    }
-    if (infoUp) {  // on the System screen the buttons close it (middle installs)
-      if (isMiddle && availBuild > 0 && coenoLinked()) {
-        app::installUpdateSoon();
-        infoUntil = now + 120000;
-      } else {
-        infoUntil = 0;
-      }
-      app::redraw(false);
-      return;
-    }
+  // Presses and 3 s holds do what Display → Buttons says. Fixed: middle held
+  // 10 s = setup network, left + right held 10 s = erase.
+  auto doAction = [&](const String &action) {
     if (action == "prev") app::prevPage();
     else if (action == "next") app::nextPage();
     else if (action == "view") app::cycleView();
@@ -655,19 +640,52 @@ void keys() {
       app::redraw(false);
     }
   };
-  if (eL && !keyLeft.down && !keyLeft.longDone) shortPress(settings::get().keyLeft, false);
-  if (eR && !keyRight.down && !keyRight.longDone) shortPress(settings::get().keyRight, false);
+  auto shortPress = [&](const String &action, bool isMiddle) {
+    const Settings &s = settings::get();
+    bool ackHere = s.keyAck == "any" || isMiddle;
+    if (ackHere && !alarms.empty() && !acked) {
+      app::ackAlarm();
+      return;
+    }
+    if (infoUp) {  // on the System screen a press closes it (middle installs)
+      if (isMiddle && availBuild > 0 && coenoLinked()) {
+        app::installUpdateSoon();
+        infoUntil = now + 120000;
+      } else {
+        infoUntil = 0;
+      }
+      app::redraw(false);
+      return;
+    }
+    doAction(action);
+  };
+  auto holdPress = [&](const String &action) {
+    if (action == "info" && infoUp) {  // held again on the System screen: check for updates
+      if (coenoLinked() || settings::get().githubUpdates) app::checkUpdateSoon();
+      infoUntil = now + 120000;
+      app::redraw(false);
+      return;
+    }
+    doAction(action);
+  };
+  const Settings &ks = settings::get();
+  if (eL && !keyLeft.down && !keyLeft.longDone) {
+    if (now - keyLeft.at >= 3000) holdPress(ks.holdLeft);
+    else shortPress(ks.keyLeft, false);
+  }
+  if (eR && !keyRight.down && !keyRight.longDone) {
+    if (now - keyRight.at >= 3000) holdPress(ks.holdRight);
+    else shortPress(ks.keyRight, false);
+  }
   if (eM && !keyMid.down && !keyMid.longDone) {
     uint32_t held = now - keyMid.at;
     if (held >= 10000) {
       net::openSetup("Setup network opened with the button.");
       app::redraw(false);
     } else if (held >= 3000) {
-      if (infoUp && coenoLinked()) app::checkUpdateSoon();
-      infoUntil = now + 120000;
-      app::redraw(false);
+      holdPress(ks.holdMid);
     } else {
-      shortPress(settings::get().keyMid, true);
+      shortPress(ks.keyMid, true);
     }
   }
 }
